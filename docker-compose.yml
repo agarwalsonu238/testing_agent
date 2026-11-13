@@ -1,0 +1,35 @@
+# testing_agent — local full stack (FastAPI backend + Next.js frontend)
+#
+#   cp backend/.env.example backend/.env
+#   docker compose up --build
+#
+# Frontend: http://localhost:3000   Backend: http://localhost:8000/docs
+
+services:
+  # ── FastAPI backend ──────────────────────────────────
+  api:
+    build:
+      context: ./backend
+    image: testing-agent-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      CORS_ORIGINS: '["http://localhost:3000"]'
+
+  # ── Next.js frontend ─────────────────────────────────
+  web:
+    build:
+      context: ./frontend
+      args:
+        # Browser-facing URL of the API (baked into the bundle at build time)
+        NEXT_PUBLIC_BACKEND_URL: http://localhost:8000
+    image: testing-agent-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - api

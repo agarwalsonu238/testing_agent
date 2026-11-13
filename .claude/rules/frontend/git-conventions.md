@@ -1,0 +1,53 @@
+---
+description: Guide commit messages, branch naming, and pull request hygiene in the Next.js frontend (`frontend/`).
+paths:
+  - "frontend/**"
+---
+# Git Conventions
+
+Guide commit messages, branch naming, and pull request hygiene in the Next.js frontend (`frontend/`).
+
+Use this rule during the Build and Ship stages.
+
+## AI Responsibilities
+
+- Follow the project's commit convention when proposing commit messages.
+- Use the correct branch prefix for the type of change.
+- Reference the relevant issue or ticket in the commit or PR description when one exists.
+- Keep commits focused — one logical change per commit.
+
+## AI Must Avoid
+
+- Using generic commit messages ("fix stuff", "update", "wip") when a descriptive one is possible.
+- Committing unrelated changes together (e.g., a feature and a debug log cleanup in the same commit).
+- Force-pushing to shared branches without explicit instruction.
+
+## Stack-Specific Guidance
+
+For projects using Conventional Commits, use `feat:`, `fix:`, `chore:`, `docs:`, `test:`, `refactor:` prefixes. Include a scope in parentheses when the change is scoped to a module or component.
+
+### Branches
+
+- `feat/…`, `fix/…`, `chore/…`, `docs/…` — match team convention.
+
+### Commits
+
+- Review your diff: `git diff main...HEAD` (or default branch).
+- Prefer **Conventional Commits** (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
+- Keep PRs focused; include **screenshots or recordings** for visible UI changes.
+
+### PRs
+
+- Link tracking issue/ticket when applicable.
+- Include **before/after** screenshots or short clips for visual changes.
+- Describe how to test (devices, feature flags, demo accounts).
+
+### Reviews
+
+- Keep diffs reviewable; split refactors from feature changes when possible.
+
+## Acceptance Criteria
+
+- Commit messages follow the project's convention.
+- Branch name matches the project's naming pattern.
+- PR description references the task or issue being addressed.
