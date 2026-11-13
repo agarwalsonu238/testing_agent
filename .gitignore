@@ -1,0 +1,28 @@
+# OS / editors
+.DS_Store
+.idea/
+*.swp
+
+# Env files (each app keeps its own .env.example)
+.env
+.env.*
+!.env.example
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local certs
+*.pem

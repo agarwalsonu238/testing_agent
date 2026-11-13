@@ -1,0 +1,52 @@
+---
+description: Guide SEO metadata, Open Graph tags, and page-head management in the Next.js frontend (`frontend/`).
+paths:
+  - "frontend/**"
+---
+# SEO And Metadata
+
+Guide SEO metadata, Open Graph tags, and page-head management in the Next.js frontend (`frontend/`).
+
+Use this rule during the Plan, Build, and Review stages.
+
+## AI Responsibilities
+
+- Use the framework's native metadata API; do not mix approaches on the same page.
+- Set `<title>`, `description`, `og:title`, `og:description`, and `og:image` for every public-facing page.
+- Define canonical URLs for pages with query-parameter variants.
+- Avoid duplicate `<meta>` tags from nested component trees.
+
+## AI Must Avoid
+
+- Hardcoding metadata strings that should come from page data.
+- Leaving `<title>` as the default app name for content-specific pages.
+- Setting `noindex` on pages that should be indexed, or the reverse.
+
+## Stack-Specific Guidance
+
+For Next.js App Router, use the `metadata` export or `generateMetadata` function per segment. For Remix, use the `meta` export. For Vue/Nuxt, use `useHead` or the `head` component option.
+
+- Ensure each public route defines **title** and **meta description**.
+
+### Social previews
+
+- Provide **Open Graph** (`og:title`, `og:description`, `og:image`) for pages that are shared.
+- Add Twitter card tags when the product is distributed on X/Twitter.
+
+### Structured data
+
+- Use JSON-LD for entities you truly expose (products, articles); validate with Rich Results guidelines.
+
+### Canonical URLs
+
+- Avoid duplicate content across `www` / apex / trailing slash variants; set canonical where applicable.
+
+### Sitemaps & robots
+
+- Generate sitemap for indexable routes; keep `robots.txt` aligned with staging vs production.
+
+## Acceptance Criteria
+
+- Every public page has a unique `<title>` and `description`.
+- Open Graph tags are present for pages shared on social platforms.
+- No duplicate `<meta name="description">` tags rendered by nested components.
