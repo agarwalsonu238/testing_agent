@@ -39,5 +39,5 @@ uv run ruff format --check . && uv run ruff check . && uv run mypy src tests && 
 
 ## Run
 
-- Both apps, hot reload: `./run-local-dev.sh` (FE http://localhost:3000, BE http://localhost:8000/docs)
+- Both apps, hot reload: `./run-local-dev.sh` (dashboard http://localhost:4000, BE http://localhost:8400/docs)
 - Containers: `docker compose up --build`

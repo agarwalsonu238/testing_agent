@@ -26,3 +26,6 @@ htmlcov/
 
 # Local certs
 *.pem
+
+# QA agent run folders (reports, screenshots, traces, worktrees) stay on this machine
+.qa-runs/

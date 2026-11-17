@@ -3,7 +3,10 @@
 #   cp backend/.env.example backend/.env
 #   docker compose up --build
 #
-# Frontend: http://localhost:3000   Backend: http://localhost:8000/docs
+# Dashboard: http://localhost:4000   Backend: http://localhost:8400/docs
+#
+# Containers serve the dashboard only. Agent runs need Claude Code logged in on your machine and
+# Quick Scan needs a local browser, so use ./run-local-dev.sh for real QA runs.
 
 services:
   # ── FastAPI backend ──────────────────────────────────
@@ -13,12 +16,12 @@ services:
     image: testing-agent-api
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8400:8000"
     env_file:
       - path: ./backend/.env
         required: false
     environment:
-      CORS_ORIGINS: '["http://localhost:3000"]'
+      CORS_ORIGINS: '["http://localhost:4000"]'
 
   # ── Next.js frontend ─────────────────────────────────
   web:
@@ -26,10 +29,10 @@ services:
       context: ./frontend
       args:
         # Browser-facing URL of the API (baked into the bundle at build time)
-        NEXT_PUBLIC_BACKEND_URL: http://localhost:8000
+        NEXT_PUBLIC_BACKEND_URL: http://localhost:8400
     image: testing-agent-web
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4000:3000"
     depends_on:
       - api
