@@ -1,13 +1,11 @@
-import { BackendStatus } from "@/components/backend-status";
+import { Suspense } from "react";
 
-export default function Home() {
+import { FindingsBoard } from "@/components/findings-board";
+
+export default function ToReviewPage() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 p-8">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">testing_agent</h1>
-        <p className="text-muted-foreground">Next.js frontend · FastAPI backend</p>
-      </div>
-      <BackendStatus />
-    </main>
+    <Suspense fallback={<p className="text-muted-foreground">Loading findings…</p>}>
+      <FindingsBoard />
+    </Suspense>
   );
 }
