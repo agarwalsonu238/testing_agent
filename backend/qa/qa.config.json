@@ -1,0 +1,53 @@
+{
+  "pages": [
+    { "path": "/", "name": "Home" }
+  ],
+  "viewports": {
+    "desktop": { "width": 1440, "height": 900 },
+    "mobile": { "width": 390, "height": 844, "is_mobile": true }
+  },
+  "limits": {
+    "slow_api_ms": 2000,
+    "slow_page_ms": 5000,
+    "page_timeout_ms": 30000,
+    "max_links_per_page": 25
+  },
+  "noise_filter": [
+    "\\[HMR\\]",
+    "\\[Fast Refresh\\]",
+    "webpack-hmr",
+    "turbopack-hmr",
+    "_next/webpack-hmr",
+    "__nextjs_original-stack-frame",
+    "\\.hot-update\\.",
+    "Download the React DevTools",
+    "/favicon\\.ico",
+    "\\[vite\\] (connecting|connected)"
+  ],
+  "api_url_pattern": "*/api/*",
+  "risky_endpoints": [
+    { "url": "*/api/*payment*" },
+    { "url": "*/api/*checkout*", "method": "POST" },
+    { "url": "*/api/*transfer*" },
+    { "url": "*/api/*account*", "method": "DELETE" },
+    { "url": "*/api/*users/*", "method": "DELETE" }
+  ],
+  "mocks": [],
+  "mocks_file": null,
+  "auth": {
+    "mock_storage_state": null,
+    "login": null
+  },
+  "tests": {
+    "isolated_dir": "tests/e2e/isolated",
+    "live_dir": "tests/e2e/live",
+    "default_folder": "isolated",
+    "registry_path": "tests/registry.json",
+    "id_prefix": "QA-",
+    "id_digits": 3,
+    "playwright_cwd": ".",
+    "playwright_command": ["npx", "playwright", "test"],
+    "pr_base": "main",
+    "branch_prefix": "qa/save-test-"
+  }
+}
