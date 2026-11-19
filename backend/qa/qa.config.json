@@ -1,10 +1,56 @@
 {
   "pages": [
-    { "path": "/", "name": "Home" }
+    {
+      "path": "/",
+      "name": "Home"
+    },
+    {
+      "path": "/search",
+      "name": "Search"
+    },
+    {
+      "path": "/how-it-works",
+      "name": "How it works"
+    },
+    {
+      "path": "/become-host",
+      "name": "Become a host"
+    },
+    {
+      "path": "/faqs",
+      "name": "FAQs"
+    },
+    {
+      "path": "/cancellation-policy",
+      "name": "Cancellation policy"
+    },
+    {
+      "path": "/refund-policy",
+      "name": "Refund policy"
+    },
+    {
+      "path": "/safety-standards",
+      "name": "Safety standards"
+    },
+    {
+      "path": "/trust-safety",
+      "name": "Trust & safety"
+    },
+    {
+      "path": "/terms-privacy",
+      "name": "Terms & privacy"
+    }
   ],
   "viewports": {
-    "desktop": { "width": 1440, "height": 900 },
-    "mobile": { "width": 390, "height": 844, "is_mobile": true }
+    "desktop": {
+      "width": 1440,
+      "height": 900
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "is_mobile": true
+    }
   },
   "limits": {
     "slow_api_ms": 2000,
@@ -26,11 +72,38 @@
   ],
   "api_url_pattern": "*/api/*",
   "risky_endpoints": [
-    { "url": "*/api/*payment*" },
-    { "url": "*/api/*checkout*", "method": "POST" },
-    { "url": "*/api/*transfer*" },
-    { "url": "*/api/*account*", "method": "DELETE" },
-    { "url": "*/api/*users/*", "method": "DELETE" }
+    {
+      "url": "*/api/*payment*"
+    },
+    {
+      "url": "*/api/*refund*"
+    },
+    {
+      "url": "*/api/*payout*"
+    },
+    {
+      "url": "*/api/hosts/me/bank-account*"
+    },
+    {
+      "url": "*/api/admin/*",
+      "method": "POST"
+    },
+    {
+      "url": "*/api/admin/*",
+      "method": "PUT"
+    },
+    {
+      "url": "*/api/admin/*",
+      "method": "PATCH"
+    },
+    {
+      "url": "*/api/*",
+      "method": "DELETE"
+    },
+    {
+      "url": "*/api/parent-auth/signinup/code",
+      "method": "POST"
+    }
   ],
   "mocks": [],
   "mocks_file": null,
@@ -39,15 +112,19 @@
     "login": null
   },
   "tests": {
-    "isolated_dir": "tests/e2e/isolated",
-    "live_dir": "tests/e2e/live",
+    "isolated_dir": "frontend/tests/e2e/isolated",
+    "live_dir": "frontend/tests/e2e/live",
     "default_folder": "isolated",
-    "registry_path": "tests/registry.json",
+    "registry_path": "frontend/tests/e2e/registry.json",
     "id_prefix": "QA-",
     "id_digits": 3,
-    "playwright_cwd": ".",
-    "playwright_command": ["npx", "playwright", "test"],
-    "pr_base": "main",
+    "playwright_cwd": "frontend",
+    "playwright_command": [
+      "npx",
+      "playwright",
+      "test"
+    ],
+    "pr_base": "dev",
     "branch_prefix": "qa/save-test-"
   }
 }
