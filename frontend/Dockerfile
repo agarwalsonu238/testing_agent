@@ -9,7 +9,9 @@ FROM node:22-alpine AS build
 WORKDIR /app
 # Next.js inlines NEXT_PUBLIC_* at build time
 ARG NEXT_PUBLIC_BACKEND_URL=""
+ARG NEXT_PUBLIC_QA_API_KEY=""
 ENV NEXT_PUBLIC_BACKEND_URL=$NEXT_PUBLIC_BACKEND_URL
+ENV NEXT_PUBLIC_QA_API_KEY=$NEXT_PUBLIC_QA_API_KEY
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
