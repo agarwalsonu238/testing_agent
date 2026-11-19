@@ -66,10 +66,26 @@ export function AppSidebar() {
           <Link href="/" className="font-semibold tracking-tight">
             QA Testing Agent
           </Link>
-          <p className="truncate text-xs text-muted-foreground" title={config.data?.app_url}>
-            testing {config.data?.app_url.replace(/^https?:\/\//, "") ?? "…"}
-          </p>
         </div>
+
+        <nav aria-label="Agents" className="grid gap-0.5">
+          <p className="px-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Agents</p>
+          {config.error && (
+            <p className="flex items-center gap-1 px-2 text-xs text-destructive">
+              <CircleExclamationPoint className="size-3" aria-hidden /> Backend unreachable
+            </p>
+          )}
+          {config.data?.agents.map((agent) => (
+            <NavLink
+              key={agent.name}
+              href={`/agents/${agent.name}`}
+              icon={agent.name === "qa-lead" ? <CircleCheck /> : <Bot />}
+              active={pathname === `/agents/${agent.name}`}
+            >
+              {agentLabel(agent.name)}
+            </NavLink>
+          ))}
+        </nav>
 
         <nav aria-label="Main" className="grid gap-0.5">
           <NavLink href="/check" icon={<Play />} active={pathname === "/check"}>
@@ -101,25 +117,6 @@ export function AppSidebar() {
           <NavLink href="/setup" icon={<ShieldCheck />} active={pathname === "/setup"}>
             Setup check
           </NavLink>
-        </nav>
-
-        <nav aria-label="Agents" className="grid gap-0.5">
-          <p className="px-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">Agents</p>
-          {config.error && (
-            <p className="flex items-center gap-1 px-2 text-xs text-destructive">
-              <CircleExclamationPoint className="size-3" aria-hidden /> Backend unreachable
-            </p>
-          )}
-          {config.data?.agents.map((agent) => (
-            <NavLink
-              key={agent.name}
-              href={`/agents/${agent.name}`}
-              icon={agent.name === "qa-lead" ? <CircleCheck /> : <Bot />}
-              active={pathname === `/agents/${agent.name}`}
-            >
-              {agentLabel(agent.name)}
-            </NavLink>
-          ))}
         </nav>
       </div>
     </aside>
