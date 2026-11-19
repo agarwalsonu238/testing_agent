@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "qa-testing-agent": {
+      "command": "uv",
+      "args": ["run", "qa-mcp-server"],
+      "cwd": "backend"
+    }
+  }
+}
