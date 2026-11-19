@@ -5,8 +5,11 @@
 #
 # Dashboard: http://localhost:4000   Backend: http://localhost:8400/docs
 #
-# Containers serve the dashboard only. Agent runs need Claude Code logged in on your machine and
-# Quick Scan needs a local browser, so use ./run-local-dev.sh for real QA runs.
+# The backend image includes Claude Code, Node (for Playwright MCP) and a browser, so agent
+# runs and Quick Scan both work in the container too — but Claude Code needs to be logged in:
+# set CLAUDE_CODE_OAUTH_TOKEN in backend/.env (from `claude setup-token`, run locally) since
+# there's no interactive terminal inside the container for the normal subscription login.
+# See the repo README for deploying this same image (Render, etc.).
 
 services:
   # ── FastAPI backend ──────────────────────────────────

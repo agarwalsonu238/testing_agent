@@ -5,6 +5,8 @@
  */
 export const BACKEND_URL = (process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8400").replace(/\/$/, "");
 export const API_BASE = `${BACKEND_URL}/api/v1`;
+// Only set once the backend has API_AUTH_TOKEN configured (a deployed backend); empty locally.
+const API_KEY = process.env.NEXT_PUBLIC_QA_API_KEY ?? "";
 
 export class ApiError extends Error {
   constructor(
@@ -31,7 +33,11 @@ function detailMessage(body: unknown): string | null {
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
+      ...init?.headers,
+    },
   });
   if (!res.ok) {
     const fallback = `${init?.method ?? "GET"} ${path} failed with ${res.status}`;
@@ -236,5 +242,9 @@ export const runSavedTest = (testId: string) =>
   post<RunDetail>(`/saved-tests/${encodeURIComponent(testId)}/run`);
 
 /** URL of a file inside a run folder (screenshots, designs, traces, logs). */
-export const runFileUrl = (runId: string, path: string) =>
-  `${API_BASE}/runs/${encodeURIComponent(runId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+export const runFileUrl = (runId: string, path: string) => {
+  const url = `${API_BASE}/runs/${encodeURIComponent(runId)}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+  // <img>/<a> can't set a custom header, so the key goes in the query string here instead —
+  // the backend accepts either. Only relevant once API_AUTH_TOKEN is configured.
+  return API_KEY ? `${url}?key=${encodeURIComponent(API_KEY)}` : url;
+};
