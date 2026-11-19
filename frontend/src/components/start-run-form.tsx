@@ -154,7 +154,8 @@ export function StartRunForm({ variant }: { variant: Variant }) {
         </>
       )}
 
-      {variant.kind !== "agent" || variant.agent !== "code-reviewer" ? (
+      {/* Mode is meaningless for the two static-analysis agents — neither opens a browser. */}
+      {variant.kind !== "agent" || !["code-reviewer", "api-checker"].includes(variant.agent) ? (
         <ModePicker value={mode} onChange={setMode} disabled={busy} />
       ) : null}
 
