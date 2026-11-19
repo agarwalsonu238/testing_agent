@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     test_writer_open_pr: bool = True
     diff_base: str = "origin/main"
 
+    # --- MCP server (lets other AI coding tools - Cursor, Antigravity, etc. - call this
+    # backend's own API as MCP tools; see app/mcp_server.py). Must match where the backend
+    # and dashboard actually run; defaults match run-local-dev.sh. ---
+    mcp_backend_url: str = "http://127.0.0.1:8400/api/v1"
+    mcp_dashboard_url: str = "http://127.0.0.1:4000"
+
     @property
     def qa_config_path(self) -> Path:
         return self.qa_dir / "qa.config.json"

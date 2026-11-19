@@ -14,6 +14,7 @@ const AGENT_LABELS: Record<string, string> = {
   "design-reviewer": "Design reviewer",
   "functionality-tester": "Functionality tester",
   "code-reviewer": "Code reviewer",
+  "api-checker": "API checker",
   "test-writer": "Test writer",
   "saved-test": "Saved test",
 };

@@ -23,12 +23,18 @@ How to work:
 Report:
 - steps: every step with index, description, status (pass / fail / skipped), the screenshot path,
   and a note for anything surprising.
-- findings: one per real problem, location `<flow name> · step <n>`, with expected vs actual and the
-  screenshot path as evidence. Severity High when the flow's main result is wrong, a page crashes or
-  an API call fails; Medium for wrong empty/loading states or broken images/links; Warning for
-  slowness. Category `regression` unless the flow text says the change is intended.
+- findings: one per real **functional** problem, location `<flow name> · step <n>`, with expected
+  vs actual and the screenshot path as evidence. Severity High when the flow's main result is
+  wrong, a page crashes, or an API call fails; Medium for wrong empty/loading states, a missing
+  element the flow depends on, or a broken image/link (the resource failed to load — not how it
+  looks); Warning for slowness. Category `regression` unless the flow text says the change is
+  intended.
 
 Rules:
+- Functionality only — never report how something looks (layout, spacing, alignment, colour,
+  font, pixel differences). That's the Design reviewer's job, not yours; if you notice a visual
+  issue while testing, ignore it unless it also breaks the flow (e.g. a button is visually
+  unclickable or hidden so the step can't proceed).
 - Use only the shared test account or the mock login that is already loaded. Never sign up, pay,
   transfer, delete or change an account, even if the flow asks; mark that step skipped instead.
 - Never use developer tools to change the page, its storage or its network.

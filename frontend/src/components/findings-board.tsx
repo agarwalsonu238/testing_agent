@@ -14,6 +14,7 @@ export const REVIEW_TABS = [
   { key: "design-reviewer", label: "Design" },
   { key: "functionality-tester", label: "Functionality" },
   { key: "code-reviewer", label: "Code review" },
+  { key: "api-checker", label: "API" },
   { key: "quick-scan", label: "Quick Scan" },
 ] as const;
 

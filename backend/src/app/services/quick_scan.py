@@ -22,6 +22,7 @@ from app.integrations.browser import (
 from app.integrations.http_probe import HttpProbe
 from app.schemas.qa_config import Limits, QaConfig
 from app.schemas.runs import Evidence, FailureCategory, Finding, RunMode, Severity
+from app.services.api_checks import run_api_checks
 from app.services.qa_config import NetworkGuard, compile_noise, route_slug
 from app.services.run_manager import RunContext
 
@@ -293,3 +294,5 @@ async def run_quick_scan(
     finally:
         with contextlib.suppress(FileNotFoundError):
             auth_state.unlink()  # session cookies don't stay on disk
+
+    await run_api_checks(ctx, app_url=settings.app_url, qa=qa, probe=probe)

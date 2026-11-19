@@ -60,6 +60,28 @@ Docker (`docker compose up --build`) serves the dashboard only; real runs need `
 
 Per-app details: [frontend/README.md](frontend/README.md), [backend/README.md](backend/README.md).
 
+## Using it from other AI coding tools
+
+The dashboard isn't the only way in — the backend (`./run-local-dev.sh`, port 8400) is reachable
+from wherever you're already working:
+
+- **Claude Code (CLI or the VS Code extension):** `/qa-run` — a skill at
+  [`.claude/skills/qa-run/SKILL.md`](.claude/skills/qa-run/SKILL.md) (also installed at
+  `~/.claude/skills/qa-run/` so it works from *any* repo open in Claude Code, not just this one).
+  Type `/qa-run` for a Quick Scan, or `/qa-run check <describe the flow>` for Check my change.
+- **Cursor, Antigravity, Windsurf, or any other MCP-compatible tool:** an MCP server at
+  `backend/src/app/mcp_server.py` (run with `uv run qa-mcp-server`), exposing `quick_scan`,
+  `check_change`, `get_run` and `list_open_findings` as tools — the same four building blocks
+  the skill above uses, just over MCP instead of a markdown playbook. Cursor picks this up
+  automatically from [`.cursor/mcp.json`](.cursor/mcp.json). For another tool, add the same
+  block to wherever *it* keeps MCP server config (check that tool's own docs for the file —
+  it's usually `mcpServers: { "qa-testing-agent": { "command": "uv", "args": ["run",
+  "qa-mcp-server"], "cwd": "backend" } }`, the same shape Claude Desktop and Cursor both use).
+
+Either way, the backend has to be running first (`./run-local-dev.sh`) — both of these are
+clients of its API, not a replacement for it, so there's exactly one place deciding what's safe
+to run (risky-endpoint blocking, the billed-credential refusal, etc.).
+
 ## AI workflow
 
 Rules and skills are generated from [frontend-ai-starter-recipes](https://github.com/JeelVankhede/frontend-ai-starter-recipes)

@@ -24,7 +24,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="flex min-h-full flex-col md:flex-row">
+      {/* suppressHydrationWarning: some browser extensions (e.g. ColorZilla) inject a
+          cz-shortcut-listen attribute on <body> before React hydrates. That mismatch is
+          harmless and not caused by our code; this only silences warnings for this one
+          element's own attributes, not for anything inside it. */}
+      <body className="flex min-h-full flex-col md:flex-row" suppressHydrationWarning>
         <Suspense fallback={<div className="border-b bg-sidebar md:h-screen md:w-64 md:border-r" />}>
           <AppSidebar />
         </Suspense>
