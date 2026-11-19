@@ -67,6 +67,24 @@ class TestsConfig(BaseModel):
     branch_prefix: str = "qa/save-test-"
 
 
+class ApiCheckSpec(BaseModel):
+    """A direct endpoint to call during Quick Scan, independent of any page visit.
+
+    GET-only by design: it's the only HTTP method safe to call automatically, with no login
+    session and no risk of a side effect, even before `risky_endpoints` is checked.
+    """
+
+    method: Literal["GET"] = "GET"
+    path: str = Field(pattern=r"^/")  # appended to APP_URL, e.g. "/api/pricing"
+    name: str | None = None
+    headers: dict[str, str] = {}  # e.g. a static test token/cookie, if the endpoint needs one
+    expect_status: list[int] | None = None  # default: any 2xx/3xx
+
+
+class ApiChecksConfig(BaseModel):
+    endpoints: list[ApiCheckSpec] = []
+
+
 class ChangeRules(BaseModel):
     """How the QA Lead classifies changed files (globs, matched against repo-relative paths)."""
 
@@ -108,3 +126,4 @@ class QaConfig(BaseModel):
     auth: AuthConfig = AuthConfig()
     tests: TestsConfig = TestsConfig()
     changes: ChangeRules = ChangeRules()
+    api_checks: ApiChecksConfig = ApiChecksConfig()

@@ -35,9 +35,16 @@ def test_shipped_agents_load_and_reviewers_cannot_write() -> None:
         "design-reviewer",
         "functionality-tester",
         "code-reviewer",
+        "api-checker",
         "test-writer",
     }
-    for name in ("qa-lead", "design-reviewer", "functionality-tester", "code-reviewer"):
+    for name in (
+        "qa-lead",
+        "design-reviewer",
+        "functionality-tester",
+        "code-reviewer",
+        "api-checker",
+    ):
         allowed, disallowed = permission_rules(agents[name])
         assert not {"Write", "Edit", "Bash"} & set(allowed)
         assert {"Write", "Edit", "Bash"} <= set(disallowed)
@@ -244,7 +251,7 @@ def test_classify_changes_picks_agents_by_rule() -> None:
     assert "README.md" not in summary.files
     # The Functionality tester isn't in this fixed rule: it runs whenever the QA Lead (or the
     # developer) has scenarios to test, with or without a diff — see run_check_change.
-    assert summary.agents == ["code-reviewer", "design-reviewer"]
+    assert summary.agents == ["code-reviewer", "design-reviewer", "api-checker"]
     assert classify_changes(["docs/x.md"], ChangeRules()).agents == []
 
 

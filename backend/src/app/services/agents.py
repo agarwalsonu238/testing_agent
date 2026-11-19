@@ -48,6 +48,7 @@ from app.services.run_manager import RunContext
 FUNCTIONALITY_TESTER = "functionality-tester"
 DESIGN_REVIEWER = "design-reviewer"
 CODE_REVIEWER = "code-reviewer"
+API_CHECKER = "api-checker"
 QA_LEAD = "qa-lead"
 TEST_WRITER = "test-writer"
 

@@ -1,11 +1,12 @@
 """Check my change: the QA Lead plans test case scenarios, then the right agents run them.
 
-Which review agents run is a fixed rule (plan section 2): UI files → Design reviewer, every
-change → Code reviewer. The QA Lead agent adds the details the rule can't: which routes changed,
-what the code review should focus on, and — always the first thing that runs — a numbered list
-of test case scenarios (the normal path plus edge cases) for the Functionality tester. Scenarios
-are planned whenever there's a diff or a developer-described flow to test, even when there's no
-diff at all: a flow to test is never silently skipped just because nothing changed in the repo.
+Which review agents run is a fixed rule (plan section 2): UI files → Design reviewer, logic/API
+files → API checker, every change → Code reviewer. The QA Lead agent adds the details the rule
+can't: which routes changed, what the code review should focus on, and — always the first thing
+that runs — a numbered list of test case scenarios (the normal path plus edge cases) for the
+Functionality tester. Scenarios are planned whenever there's a diff or a developer-described
+flow to test, even when there's no diff at all: a flow to test is never silently skipped just
+because nothing changed in the repo.
 """
 
 import asyncio
@@ -20,6 +21,7 @@ from app.integrations import git
 from app.schemas.qa_config import ChangeRules
 from app.schemas.runs import RunMode
 from app.services.agents import (
+    API_CHECKER,
     CODE_REVIEWER,
     DESIGN_REVIEWER,
     FUNCTIONALITY_TESTER,
@@ -63,6 +65,8 @@ class ChangeSummary:
         needed = [CODE_REVIEWER]
         if self.ui:
             needed.append(DESIGN_REVIEWER)
+        if self.logic:
+            needed.append(API_CHECKER)
         return needed
 
 
@@ -176,6 +180,18 @@ async def run_check_change(
             )
         elif name == DESIGN_REVIEWER:
             await _design_reviews(ctx, deps, mode, plan.design_routes, changes)
+        elif name == API_CHECKER:
+            await run_review_agent(
+                ctx,
+                deps,
+                AgentCall(
+                    agent=get_agent(s, name),
+                    task="Compare the frontend's API calls with the backend's routes for this "
+                    "change.",
+                    mode=mode,
+                    context=changes,
+                ),
+            )
 
 
 def _first_line(text: str) -> str:
@@ -290,7 +306,7 @@ async def run_single_agent(
             )
         call = design_call(deps, route, mode, designs)
         call.task = f"{call.task}\n{task}"
-    elif agent == CODE_REVIEWER:
+    elif agent in (CODE_REVIEWER, API_CHECKER):
         repo = s.app_repo_path
         if repo is None or not await git.is_repo(repo):
             raise PreconditionError("APP_REPO_PATH must point at the app's git repository")
