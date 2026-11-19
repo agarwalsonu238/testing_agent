@@ -10,7 +10,7 @@ export function EvidenceView({ runId, evidence }: { runId: string; evidence: Evi
   return (
     <div className="grid gap-2">
       {images.length > 0 && (
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {images.map((item) => {
             const url = runFileUrl(runId, item.path as string);
             return (
@@ -18,9 +18,10 @@ export function EvidenceView({ runId, evidence }: { runId: string; evidence: Evi
                 <figcaption className="mb-1 text-xs text-muted-foreground">
                   {item.kind === "design" ? "Design" : "Page"} · {item.label}
                 </figcaption>
+                {/* Thumbnail only — click through for the full-size original. */}
                 <a href={url} target="_blank" rel="noreferrer" className="block rounded-md border focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
                   {/* eslint-disable-next-line @next/next/no-img-element -- local run evidence served by the QA backend, sizes unknown */}
-                  <img src={url} alt={`${item.kind} ${item.label}`} loading="lazy" className="max-h-80 w-full rounded-md object-contain object-top" />
+                  <img src={url} alt={`${item.kind} ${item.label}`} loading="lazy" className="max-h-36 w-full rounded-md object-contain object-top" />
                 </a>
               </figure>
             );
