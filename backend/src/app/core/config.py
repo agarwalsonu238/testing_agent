@@ -67,6 +67,19 @@ class Settings(BaseSettings):
     mcp_backend_url: str = "http://127.0.0.1:8400/api/v1"
     mcp_dashboard_url: str = "http://127.0.0.1:4000"
 
+    # --- Deployed mode (optional) ---
+    # Unset (default): no auth, matching the local-only design (127.0.0.1 binding is the
+    # boundary). Set this once the backend is reachable from anywhere but localhost — every
+    # /api/v1 request then needs a matching X-API-Key header (or ?key= for <img> tags, which
+    # can't set headers).
+    api_auth_token: SecretStr | None = None
+    # When the app repo isn't available on disk already (a deployed backend has no local
+    # checkout), clone/fetch it here on startup instead of requiring APP_REPO_PATH to pre-exist.
+    # Read-only clone: never pushed to (Save as test still needs a writable local repo).
+    app_repo_git_url: str | None = None  # e.g. https://github.com/org/app-repo.git
+    app_repo_git_token: SecretStr | None = None  # PAT with read access, for a private repo
+    app_repo_git_ref: str = "main"  # branch/tag Check my change diffs against when cloned here
+
     @property
     def qa_config_path(self) -> Path:
         return self.qa_dir / "qa.config.json"

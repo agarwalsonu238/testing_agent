@@ -2,10 +2,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.deps import require_api_key
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.errors import (
@@ -60,7 +61,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.add_exception_handler(DomainError, _domain_error)
-    app.include_router(api_router, prefix=settings.api_v1_prefix)
+    app.include_router(
+        api_router, prefix=settings.api_v1_prefix, dependencies=[Depends(require_api_key)]
+    )
     return app
 
 
