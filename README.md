@@ -82,6 +82,53 @@ Either way, the backend has to be running first (`./run-local-dev.sh`) — both 
 clients of its API, not a replacement for it, so there's exactly one place deciding what's safe
 to run (risky-endpoint blocking, the billed-credential refusal, etc.).
 
+## Deploying (e.g. Render), so you're not starting it locally every time
+
+This tool was built to run locally — deploying it changes a few things, not just where it runs:
+
+- **It becomes reachable by anyone with the URL.** Set `API_AUTH_TOKEN` on the backend once it's
+  not bound to `127.0.0.1` any more; every `/api/v1` request then needs a matching `X-API-Key`
+  header (or `?key=` — screenshots load via `<img>`, which can't send headers). Pick a long
+  random value. Note the frontend's copy of it (`NEXT_PUBLIC_QA_API_KEY`) ends up in the browser
+  bundle — real access control, not a secret a sufficiently motivated person can't extract.
+- **Check my change and the API checker need their own checkout of the app repo** — a server has
+  no local working tree to diff. Set `APP_REPO_GIT_URL` (+ `APP_REPO_GIT_TOKEN` for a private
+  repo, + `APP_REPO_GIT_REF` for which branch, default `main`); the container clones/refreshes
+  it on every start (`backend/docker-entrypoint.sh`). This means Check my change there diffs
+  **whatever's pushed to that branch**, not your local uncommitted work — push first, then run
+  it. (Save as test still needs a writable local repo, so it isn't available this way.)
+- **Claude Code needs to log in without a terminal.** Run `claude setup-token` locally (on your
+  own subscription) and set the result as `CLAUDE_CODE_OAUTH_TOKEN` on the deployed backend.
+- **`APP_URL` has to be a URL the server can reach** — not `localhost:3000`. A deployed/staging
+  URL for the app under test (which you're likely already using) is fine.
+- **Playwright needs real RAM.** Render's free tier (~512MB) is a real risk for headless
+  Chromium — expect to need a paid instance type for Check my change / Quick Scan to be
+  reliable; test Quick Scan first since it's the lighter of the two.
+- **Free-tier disk is ephemeral** — run history/screenshots may not survive a redeploy or a
+  sleep/wake cycle. Fine if you don't need that history kept.
+
+### Steps (Render, manual — more reliable than guessing at Blueprint YAML cross-service wiring)
+
+1. **Backend** → New → Web Service → connect this repo → Runtime: **Docker** → Dockerfile path
+   `backend/Dockerfile`, context `backend`. Add env vars: `API_AUTH_TOKEN` (pick a value),
+   `CLAUDE_CODE_OAUTH_TOKEN`, `APP_URL`, `APP_REPO_GIT_URL` (+ token/ref if needed),
+   `CORS_ORIGINS` (the frontend's URL, once you know it — you can redeploy to fix this after
+   step 2). Deploy, then note its `https://….onrender.com` URL.
+2. **Frontend** → New → Web Service → same repo → Dockerfile path `frontend/Dockerfile`, context
+   `frontend`. Build args (not plain env vars — Next.js inlines `NEXT_PUBLIC_*` at build time):
+   `NEXT_PUBLIC_BACKEND_URL` = the backend's URL from step 1, `NEXT_PUBLIC_QA_API_KEY` = the
+   same value as `API_AUTH_TOKEN`. Deploy, then go back and set the backend's `CORS_ORIGINS` to
+   `["https://<this-frontend-url>"]` and redeploy the backend.
+3. **MCP/skill config** — point whichever tool you use at the deployed backend instead of
+   localhost: set `MCP_BACKEND_URL` / `MCP_DASHBOARD_URL` in the backend's own `.env` (used by
+   `qa_mcp_server.py` when *it* still runs locally, spawned by Cursor/Claude Code as usual, just
+   talking to the deployed API) — or, if running `qa-mcp-server` itself elsewhere too, set
+   `MCP_BACKEND_URL`/`MCP_DASHBOARD_URL` wherever that process's env comes from.
+
+Docker build locally first if you want to catch a Dockerfile problem before Render does:
+`docker build -t qa-backend ./backend` (this adds Node + Chromium + Claude Code to the image, so
+expect it to take a few minutes and produce a multi-GB image).
+
 ## AI workflow
 
 Rules and skills are generated from [frontend-ai-starter-recipes](https://github.com/JeelVankhede/frontend-ai-starter-recipes)
