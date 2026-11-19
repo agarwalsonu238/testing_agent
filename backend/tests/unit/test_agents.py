@@ -242,7 +242,9 @@ def test_classify_changes_picks_agents_by_rule() -> None:
     assert summary.ui == ["app/pricing/page.tsx"]
     assert "src/api/plans.py" in summary.logic
     assert "README.md" not in summary.files
-    assert summary.agents == ["code-reviewer", "design-reviewer", "functionality-tester"]
+    # The Functionality tester isn't in this fixed rule: it runs whenever the QA Lead (or the
+    # developer) has scenarios to test, with or without a diff — see run_check_change.
+    assert summary.agents == ["code-reviewer", "design-reviewer"]
     assert classify_changes(["docs/x.md"], ChangeRules()).agents == []
 
 

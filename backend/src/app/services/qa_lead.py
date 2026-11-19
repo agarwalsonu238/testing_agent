@@ -1,8 +1,11 @@
-"""Check my change: the QA Lead reads the diff and runs the right agents.
+"""Check my change: the QA Lead plans test case scenarios, then the right agents run them.
 
-Which agents run is a fixed rule (plan section 2): UI files → Design reviewer, logic or API →
-Functionality tester, every change → Code reviewer. The QA Lead agent adds the details the rule
-can't: which routes changed, a flow to test, and what the code review should focus on.
+Which review agents run is a fixed rule (plan section 2): UI files → Design reviewer, every
+change → Code reviewer. The QA Lead agent adds the details the rule can't: which routes changed,
+what the code review should focus on, and — always the first thing that runs — a numbered list
+of test case scenarios (the normal path plus edge cases) for the Functionality tester. Scenarios
+are planned whenever there's a diff or a developer-described flow to test, even when there's no
+diff at all: a flow to test is never silently skipped just because nothing changed in the repo.
 """
 
 import asyncio
@@ -50,14 +53,16 @@ class ChangeSummary:
 
     @property
     def agents(self) -> list[str]:
-        """Agents the fixed rule requires, in run order."""
+        """Review agents the fixed rule requires for this diff, in run order.
+
+        The Functionality tester isn't decided here: it runs whenever there are test case
+        scenarios to try, which can happen with or without a diff (see `run_check_change`).
+        """
         if not self.files:
             return []
         needed = [CODE_REVIEWER]
         if self.ui:
             needed.append(DESIGN_REVIEWER)
-        if self.logic:
-            needed.append(FUNCTIONALITY_TESTER)
         return needed
 
 
@@ -90,35 +95,73 @@ async def run_check_change(
         since = "HEAD"
     files = await git.changed_files(repo, since)
     summary = classify_changes(files, deps.qa.changes)
-    if not summary.files:
+
+    if not summary.files and not flow:
         ctx.record.plan_summary = f"No changes since {base}; nothing to check."
         ctx.save()
         return
 
-    patch = await git.diff(repo, since)
-    diff_path = ctx.dir / "diff.patch"
-    await asyncio.to_thread(diff_path.write_text, patch)
-    ctx.add_artifact("Diff", diff_path, "code")
-    changes = [
-        "",
-        "## Change under review",
-        f"- Diff against {base} ({since[:12]}): {diff_path} (read it with the Read tool)",
-        *_file_list("- UI files", summary.ui),
-        *_file_list("- Logic/API files", summary.logic),
-        *_file_list("- Other files", summary.other),
-    ]
-    ctx.event(
-        f"{len(summary.files)} changed file(s): {len(summary.ui)} UI, {len(summary.logic)} logic",
-    )
+    changes: list[str] = []
+    if summary.files:
+        patch = await git.diff(repo, since)
+        diff_path = ctx.dir / "diff.patch"
+        await asyncio.to_thread(diff_path.write_text, patch)
+        ctx.add_artifact("Diff", diff_path, "code")
+        changes = [
+            "",
+            "## Change under review",
+            f"- Diff against {base} ({since[:12]}): {diff_path} (read it with the Read tool)",
+            *_file_list("- UI files", summary.ui),
+            *_file_list("- Logic/API files", summary.logic),
+            *_file_list("- Other files", summary.other),
+        ]
+        ctx.event(
+            f"{len(summary.files)} changed file(s): {len(summary.ui)} UI, "
+            f"{len(summary.logic)} logic"
+        )
+    else:
+        # A flow was given but nothing changed in the repo (e.g. testing an already-deployed
+        # change against a live app): still plan and run the scenarios for it.
+        ctx.event(f"No changes since {base}; testing the described flow only", level="warn")
 
-    plan = await _lead_plan(ctx, deps, mode=mode, changes=changes, wants_flow=flow is None)
-    flow_text = flow or plan.flow
+    plan = await _lead_plan(ctx, deps, mode=mode, changes=changes, flow_hint=flow)
+    scenarios = plan.scenarios or ([flow] if flow else [])
+    review_agents = summary.agents  # Code reviewer / Design reviewer; functionality runs below
+
     lines = [plan.summary.strip()] if plan.summary.strip() else []
-    lines.append("Agents: " + ", ".join(summary.agents))
+    if scenarios:
+        lines.append(f"Test case scenarios ({len(scenarios)}):")
+        lines += [f"  {i}. {_first_line(s)}" for i, s in enumerate(scenarios, 1)]
+    if review_agents:
+        lines.append("Also reviewing: " + ", ".join(review_agents))
     ctx.record.plan_summary = "\n".join(lines)
     ctx.save()
 
-    for name in summary.agents:
+    # Functionality is always checked first: the scenarios are planned before anything runs,
+    # and every one of them is tested before the (slower, less important) code/design review.
+    if scenarios:
+        ctx.event(f"{len(scenarios)} test case scenario(s) planned", source=QA_LEAD)
+        for i, scenario in enumerate(scenarios, 1):
+            ctx.event(
+                f"Testing scenario {i}/{len(scenarios)}: {_first_line(scenario)}",
+                source=FUNCTIONALITY_TESTER,
+            )
+            await run_review_agent(
+                ctx,
+                deps,
+                AgentCall(
+                    agent=get_agent(s, FUNCTIONALITY_TESTER),
+                    task=f"Test case scenario {i} of {len(scenarios)}:\n{scenario}",
+                    mode=mode,
+                    # Distinct evidence folder per scenario: without it, scenario 2's
+                    # screenshots and recorder log would overwrite scenario 1's.
+                    work_dir_name=f"{FUNCTIONALITY_TESTER}-{i}",
+                ),
+            )
+    elif flow:
+        ctx.event("Functionality tester skipped: the QA Lead gave no plan", level="warn")
+
+    for name in review_agents:
         if name == CODE_REVIEWER:
             focus = f"\nFocus on: {plan.code_review_focus}" if plan.code_review_focus else ""
             await run_review_agent(
@@ -133,27 +176,42 @@ async def run_check_change(
             )
         elif name == DESIGN_REVIEWER:
             await _design_reviews(ctx, deps, mode, plan.design_routes, changes)
-        elif name == FUNCTIONALITY_TESTER:
-            if not flow_text:
-                ctx.event("Functionality tester skipped: describe a flow to test it", level="warn")
-                continue
-            await run_review_agent(
-                ctx,
-                deps,
-                AgentCall(
-                    agent=get_agent(s, name), task=f"Test this flow:\n{flow_text}", mode=mode
-                ),
-            )
+
+
+def _first_line(text: str) -> str:
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if line:
+            return line[:120]
+    return "(empty)"
 
 
 async def _lead_plan(
-    ctx: RunContext, deps: AgentDeps, *, mode: RunMode, changes: list[str], wants_flow: bool
+    ctx: RunContext, deps: AgentDeps, *, mode: RunMode, changes: list[str], flow_hint: str | None
 ) -> LeadPlan:
-    ask = (
-        "Plan the checks for this change: list the routes whose UI changed (for the Design "
-        "reviewer), suggest what the Code reviewer should focus on"
-    )
-    ask += ", and write a short numbered flow for the Functionality tester." if wants_flow else "."
+    if changes:
+        ask = (
+            "Plan the checks for this change: list the routes whose UI changed (for the Design "
+            "reviewer) and suggest what the Code reviewer should focus on. Then write 1-4 "
+            "concrete test case scenarios for the Functionality tester: the normal path first, "
+            "then the important edge cases the change implies. Each scenario is a short numbered "
+            "plain-English flow ending with an Expected: line."
+        )
+    else:
+        ask = (
+            "There is no local code diff to check — only a flow the developer wants tested in "
+            "the running app. Turn it into 1-4 concrete test case scenarios for the "
+            "Functionality tester: the normal path first, then the important edge cases it "
+            "implies. Each scenario is a short numbered plain-English flow ending with an "
+            "Expected: line. Leave design_routes empty and don't suggest a code review focus."
+        )
+    context = list(changes)
+    if flow_hint:
+        ask += (
+            " The developer specifically asked to test this, including any edge cases they "
+            "named — make sure your scenarios cover it:"
+        )
+        context += ["", "## Flow the developer asked to test", flow_hint]
     try:
         run = await invoke_agent(
             ctx,
@@ -162,7 +220,7 @@ async def _lead_plan(
                 agent=get_agent(deps.settings, QA_LEAD),
                 task=ask,
                 mode=mode,
-                context=changes,
+                context=context,
                 schema=LEAD_SCHEMA,
             ),
         )

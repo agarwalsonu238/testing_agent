@@ -66,6 +66,10 @@ class AgentResult(BaseModel):
     steps: list[Step] = []
     checks: list[Check] = []
     duration_s: float | None = None
+    # Relative to the run folder (e.g. "agent-output/functionality-tester-2"): where this
+    # agent's evidence and recorded Playwright code live. Distinguishes repeat calls to the same
+    # agent within one run (one per test case scenario) from each other.
+    work_dir: str = ""
 
 
 class Artifact(BaseModel):

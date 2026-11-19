@@ -453,6 +453,11 @@ class AgentCall:
     tests_dir: str = ""
     schema: dict[str, Any] = field(default_factory=lambda: REPORT_SCHEMA)
     viewport: str = "1440x900"
+    # Evidence folder name under agent-output/ (default: the agent's name). Set this to a unique
+    # value when calling the same agent more than once in a run (e.g. one Functionality tester
+    # call per test case scenario) so each call's screenshots, logs and recorded code don't
+    # overwrite each other.
+    work_dir_name: str | None = None
 
 
 def build_prompt(call: AgentCall, deps: AgentDeps, work: Path, guard: NetworkGuard) -> str:
@@ -523,7 +528,7 @@ async def invoke_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) -> Age
     cwd = call.cwd or s.app_repo_path
     if cwd is None:
         raise PreconditionError("Set APP_REPO_PATH in .env so agents run inside the app repo")
-    work = ctx.dir / "agent-output" / name
+    work = ctx.dir / "agent-output" / (call.work_dir_name or name)
     work.mkdir(parents=True, exist_ok=True)
     guard = NetworkGuard(deps.qa, call.mode)
     recorder = work / "playwright-log.jsonl"
@@ -627,6 +632,7 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
     run = await invoke_agent(ctx, deps, call)
     duration = round(loop.time() - started, 1)
     task_label = call.task.strip()[:4000] or name  # full text: Save as test reuses the flow
+    work_dir = run.work.relative_to(ctx.dir).as_posix()
 
     def blocked(reason: str) -> AgentResult:
         return AgentResult(
@@ -636,6 +642,7 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
             blocked_reason=reason,
             checks=run.checks,
             duration_s=duration,
+            work_dir=work_dir,
         )
 
     for log_name, label in (
@@ -644,7 +651,7 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
     ):
         path = run.work / log_name
         if path.is_file() and path.stat().st_size > 0:
-            ctx.add_artifact(f"{name}: {label}", path, "log")
+            ctx.add_artifact(f"{run.work.name}: {label}", path, "log")
 
     if not run.result.ok:
         result = blocked(run.result.error or "Claude Code reported an error")
@@ -690,7 +697,7 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
     for image in sorted(run.work.glob("*.png")):
         rel = image.resolve().relative_to(ctx.dir).as_posix()
         if rel not in referenced:
-            ctx.add_artifact(f"{name}: {image.name}", image, "screenshot")
+            ctx.add_artifact(f"{run.work.name}: {image.name}", image, "screenshot")
 
     if name == FUNCTIONALITY_TESTER:
         verdict, reason = flow_verdict(run.checks)
@@ -706,6 +713,7 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
         steps=steps,
         checks=run.checks,
         duration_s=duration,
+        work_dir=work_dir,
     )
     ctx.add_agent_result(result)
     ctx.event(f"{name}: {verdict} ({len(findings)} finding(s))", source=name)
@@ -715,7 +723,7 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
 class LeadPlan(BaseModel):
     summary: str = ""
     design_routes: list[str] = Field(default_factory=list)
-    flow: str | None = None
+    scenarios: list[str] = Field(default_factory=list)
     code_review_focus: str | None = None
 
 
@@ -729,10 +737,12 @@ LEAD_SCHEMA: dict[str, Any] = {
             "items": {"type": "string", "pattern": "^/"},
             "description": "Routes whose UI changed (max 3)",
         },
-        "flow": {
-            "type": "string",
-            "description": "Numbered plain-English flow for the Functionality tester, "
-            "with Expected",
+        "scenarios": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "1-4 test case scenarios for the Functionality tester: the normal "
+            "path first, then the important edge cases. Each a short numbered plain-English "
+            "flow ending with an Expected: line.",
         },
         "code_review_focus": {"type": "string"},
     },

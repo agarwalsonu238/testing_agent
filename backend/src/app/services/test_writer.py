@@ -18,7 +18,14 @@ from app.core.errors import BlockedError, ConflictError, PreconditionError
 from app.integrations import git
 from app.integrations.process import ProcessError, run_process
 from app.schemas.qa_config import TestsConfig
-from app.schemas.runs import Evidence, Finding, RunRecord, SavedTestInfo, SaveTestRequest
+from app.schemas.runs import (
+    AgentResult,
+    Evidence,
+    Finding,
+    RunRecord,
+    SavedTestInfo,
+    SaveTestRequest,
+)
 from app.services.agents import (
     FUNCTIONALITY_TESTER,
     TEST_WRITER,
@@ -60,23 +67,33 @@ def write_registry(path: Path, entries: list[dict[str, Any]], wrapped: bool) -> 
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
-def passing_flow(source: RunRecord) -> str | None:
-    """The flow text of a passing Functionality tester result, if the run has one."""
+def passing_flow_result(source: RunRecord) -> AgentResult | None:
+    """The first passing Functionality tester result, if the run has one.
+
+    A Check my change run can test several test case scenarios (one Functionality tester call
+    each); this is the first one that passed.
+    """
     if source.status != "finished":
         return None
     for result in source.agents:
         if result.agent == FUNCTIONALITY_TESTER and result.verdict == "PASS":
-            return result.task
+            return result
     return None
 
 
-def ensure_can_save(source: RunRecord) -> str:
-    flow = passing_flow(source)
-    if flow is None:
+def passing_flow(source: RunRecord) -> str | None:
+    """The flow text of a passing Functionality tester result, if the run has one."""
+    result = passing_flow_result(source)
+    return result.task if result else None
+
+
+def ensure_can_save(source: RunRecord) -> AgentResult:
+    result = passing_flow_result(source)
+    if result is None:
         raise ConflictError(
             "Only a finished run with a passing Functionality tester flow can be saved"
         )
-    return flow
+    return result
 
 
 async def run_playwright_test(
@@ -109,11 +126,14 @@ async def save_as_test(
     repo = s.app_repo_path
     if repo is None or not await git.is_repo(repo):
         raise PreconditionError("APP_REPO_PATH must point at the app's git repository")
-    flow = ensure_can_save(source)
+    result = ensure_can_save(source)
+    flow = result.task
     source_dir = ctx.store.run_dir(source.id)
-    code_path = source_dir / "agent-output" / FUNCTIONALITY_TESTER / "playwright-code.json"
+    # Older runs (before per-scenario evidence folders) always used this fixed path.
+    work_dir = result.work_dir or f"agent-output/{FUNCTIONALITY_TESTER}"
+    code_path = source_dir / work_dir / "playwright-code.json"
     recorded = code_path.read_text() if code_path.is_file() else "[]"
-    steps = next(r.steps for r in source.agents if r.agent == FUNCTIONALITY_TESTER)
+    steps = result.steps
 
     entries, wrapped = read_registry(repo / tests.registry_path)
     test_id = next_test_id(

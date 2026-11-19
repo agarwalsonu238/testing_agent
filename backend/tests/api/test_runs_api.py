@@ -1,10 +1,16 @@
+import asyncio
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI
 from httpx import AsyncClient
 from pydantic import SecretStr
 
+from app.api.deps import get_claude
 from app.core.config import Settings
+from app.integrations import git
+from app.integrations.claude_code import AgentInvocation, ClaudeRunResult, ProgressFn
 from app.schemas.runs import AgentResult, Finding, RunParams
 from app.services.run_manager import RunManager
 
@@ -59,6 +65,97 @@ async def test_quick_scan_is_blocked_when_the_app_is_not_running(
 
     listed = (await client.get("/api/v1/runs")).json()
     assert listed[0]["id"] == run["id"] and listed[0]["counts"] == {"open": 0, "total": 0}
+
+
+class _FakeClaudeCode:
+    """Stands in for the `claude` binary: returns a canned structured reply per agent name."""
+
+    def __init__(self, replies: dict[str, dict[str, Any]]) -> None:
+        self._replies = replies
+        self.agents_called: list[str] = []
+
+    def ensure_no_billed_credentials(self) -> None:
+        return None
+
+    async def run(
+        self, inv: AgentInvocation, on_progress: ProgressFn, timeout_s: float | None = None
+    ) -> ClaudeRunResult:
+        self.agents_called.append(inv.agent)
+        return ClaudeRunResult(ok=True, structured=self._replies.get(inv.agent, {}))
+
+
+async def _init_repo_with_no_pending_changes(path: Path) -> None:
+    """A real, committed git repo with nothing changed — `git diff` against it is empty."""
+    await asyncio.to_thread(path.mkdir, parents=True, exist_ok=True)
+    await git.git(path, "init", "-q")
+    await git.git(path, "config", "user.email", "qa@test.local")
+    await git.git(path, "config", "user.name", "QA Test")
+    await asyncio.to_thread((path / "README.md").write_text, "placeholder")
+    await git.commit(path, ["README.md"], "initial")
+
+
+async def test_check_change_tests_a_described_flow_even_with_no_diff(
+    client: AsyncClient, app: FastAPI, settings: Settings, tmp_path: Path
+) -> None:
+    """Regression: the developer's flow must still be tested when there's nothing to diff
+    against (e.g. checking an already-deployed change) — it must never be silently skipped."""
+    settings.app_repo_path = tmp_path / "app-repo"
+    await _init_repo_with_no_pending_changes(settings.app_repo_path)
+    fake = _FakeClaudeCode(
+        {
+            "qa-lead": {
+                "summary": "No diff; testing the described flow.",
+                "design_routes": [],
+                "scenarios": [
+                    "1. Book the same pet for the same date twice.\nExpected: the first "
+                    "booking is cancelled.",
+                    "2. Book a different pet for the same date.\nExpected: both bookings "
+                    "stay active.",
+                ],
+            },
+            "functionality-tester": {"summary": "Checked.", "findings": [], "steps": []},
+        }
+    )
+    app.dependency_overrides[get_claude] = lambda: fake
+    try:
+        response = await client.post(
+            "/api/v1/runs/check-change",
+            json={"mode": "mocked", "flow": "Check the double-booking cancellation flow"},
+        )
+        assert response.status_code == 202
+        run_id = response.json()["id"]
+        await _wait(app)
+    finally:
+        del app.dependency_overrides[get_claude]
+
+    detail = (await client.get(f"/api/v1/runs/{run_id}")).json()
+    assert fake.agents_called == ["qa-lead", "functionality-tester", "functionality-tester"]
+    assert "Test case scenarios (2)" in detail["plan_summary"]
+    assert len(detail["agents"]) == 2
+    assert all(a["agent"] == "functionality-tester" for a in detail["agents"])
+    assert "scenario 1 of 2" in detail["agents"][0]["task"].lower()
+    assert "scenario 2 of 2" in detail["agents"][1]["task"].lower()
+
+
+async def test_check_change_with_nothing_to_check_runs_no_agents(
+    client: AsyncClient, app: FastAPI, settings: Settings, tmp_path: Path
+) -> None:
+    """No diff and no described flow: still nothing to check, and no agent is invoked."""
+    settings.app_repo_path = tmp_path / "app-repo"
+    await _init_repo_with_no_pending_changes(settings.app_repo_path)
+    fake = _FakeClaudeCode({})
+    app.dependency_overrides[get_claude] = lambda: fake
+    try:
+        response = await client.post("/api/v1/runs/check-change", json={"mode": "mocked"})
+        run_id = response.json()["id"]
+        await _wait(app)
+    finally:
+        del app.dependency_overrides[get_claude]
+
+    detail = (await client.get(f"/api/v1/runs/{run_id}")).json()
+    assert fake.agents_called == []
+    assert detail["agents"] == []
+    assert "nothing to check" in detail["plan_summary"]
 
 
 async def test_unknown_run_and_bad_ids_are_404_or_422(client: AsyncClient) -> None:
@@ -136,7 +233,8 @@ async def test_cancel_a_finished_run_is_409(client: AsyncClient, app: FastAPI) -
 async def test_qa_config_lists_agents_and_pages(client: AsyncClient) -> None:
     body = (await client.get("/api/v1/qa-config")).json()
     assert {a["name"] for a in body["agents"]} >= {"qa-lead", "code-reviewer"}
-    assert body["pages"] == ["/"]
+    assert body["pages"][0] == "/"
+    assert len(body["pages"]) == 10  # backend/qa/qa.config.json's page list
     assert body["viewports"] == ["desktop", "mobile"]
 
 
