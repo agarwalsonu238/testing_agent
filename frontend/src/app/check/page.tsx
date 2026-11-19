@@ -12,8 +12,10 @@ export default function CheckChangePage() {
           Check my change
         </h1>
         <p className="max-w-2xl text-muted-foreground">
-          The QA Lead reads your diff and runs the right agents: UI files → Design reviewer, logic or API →
-          Functionality tester, every change → Code reviewer. Runs use your own Claude plan; run Quick Scan first.
+          The QA Lead plans test case scenarios first — the normal path plus edge cases, from your diff and
+          anything you describe — then the Functionality tester runs every one of them before the (optional)
+          Design and Code review. Functionality is always checked, even with no local diff. Runs use your own
+          Claude plan; run Quick Scan first.
         </p>
       </div>
       <StartRunForm variant={{ kind: "check-change" }} />

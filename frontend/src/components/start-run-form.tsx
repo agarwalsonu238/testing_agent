@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
 import { fieldClass, labelClass } from "@/components/form-styles";
+import { MicButton } from "@/components/mic-button";
 import { ModePicker } from "@/components/mode-picker";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +36,10 @@ export function StartRunForm({ variant }: { variant: Variant }) {
   const [baseRef, setBaseRef] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function appendDictated(chunk: string) {
+    setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${chunk}` : chunk));
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -71,9 +76,12 @@ export function StartRunForm({ variant }: { variant: Variant }) {
       {variant.kind === "check-change" && (
         <>
           <div className="grid gap-1">
-            <label htmlFor={`${id}-flow`} className={labelClass}>
-              Flow for the Functionality tester (optional)
-            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor={`${id}-flow`} className={labelClass}>
+                Flow to test (optional)
+              </label>
+              <MicButton onText={appendDictated} label="Dictate" />
+            </div>
             <textarea
               id={`${id}-flow`}
               className={`${fieldClass} min-h-36 font-mono`}
@@ -81,10 +89,12 @@ export function StartRunForm({ variant }: { variant: Variant }) {
               maxLength={4000}
               onChange={(e) => setText(e.target.value)}
               placeholder={
-                "1. Open the home page.\n2. Go to the Pricing page.\n3. Confirm the pricing cards are visible.\n4. Switch to yearly billing and confirm the prices change.\nExpected: no console errors and no failed API calls."
+                "Describe what to test, in your own words — the QA Lead turns it into test case scenarios (the normal path plus edge cases) before anything runs. For example:\nCheck that booking the same pet for the same date twice cancels the first booking."
               }
             />
-            <p className="text-xs text-muted-foreground">Leave empty and the QA Lead writes one from your diff.</p>
+            <p className="text-xs text-muted-foreground">
+              The QA Lead always writes test case scenarios first, then tests each one — from this description, or from your diff when you leave it empty. Works even with no local changes to diff against.
+            </p>
           </div>
           <div className="grid gap-1">
             <label htmlFor={`${id}-base`} className={labelClass}>
@@ -105,9 +115,12 @@ export function StartRunForm({ variant }: { variant: Variant }) {
       {variant.kind === "agent" && (
         <>
           <div className="grid gap-1">
-            <label htmlFor={`${id}-task`} className={labelClass}>
-              What should it check?
-            </label>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor={`${id}-task`} className={labelClass}>
+                What should it check?
+              </label>
+              <MicButton onText={appendDictated} label="Dictate" />
+            </div>
             <textarea
               id={`${id}-task`}
               className={`${fieldClass} min-h-36`}
