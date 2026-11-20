@@ -208,10 +208,9 @@ def _config_items(settings: Settings) -> list[SetupItem]:
             SetupItem(
                 key="designs",
                 label="Designs",
-                status="warn",
-                detail=f"No PNGs in {settings.designs_dir}",
-                fix="Only needed for the Design reviewer: export "
-                "<route>.desktop.png and <route>.mobile.png",
+                status="pass",
+                detail=f"No PNGs in {settings.designs_dir} (optional: only the Design reviewer "
+                "uses them; export <route>.desktop.png and <route>.mobile.png to enable it)",
             )
         )
     return items

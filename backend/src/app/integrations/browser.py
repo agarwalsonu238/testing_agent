@@ -4,6 +4,8 @@ It records what happened; deciding what counts as a bug is `services/quick_scan.
 """
 
 import json
+import os
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -110,15 +112,28 @@ class BrowserSession:
 
     async def __aenter__(self) -> Self:
         try:
-            self._pw = await async_playwright().start()
-            self._browser = await self._pw.chromium.launch(
-                channel=self._channel, headless=self._headless
-            )
+            try:
+                await self._start()
+            except Exception:
+                # Playwright's bundled Node driver doesn't run on older macOS (e.g. 12):
+                # retry once with the system Node.
+                system_node = shutil.which("node")
+                if os.environ.get("PLAYWRIGHT_NODEJS_PATH") or not system_node:
+                    raise
+                await self.__aexit__(None, None, None)
+                os.environ["PLAYWRIGHT_NODEJS_PATH"] = system_node
+                await self._start()
         except Exception as exc:  # driver/launch failures surface as several exception types
             await self.__aexit__(None, None, None)
             first_line = str(exc).strip().splitlines()[0] if str(exc).strip() else repr(exc)
             raise BrowserUnavailableError(first_line[:300]) from exc
         return self
+
+    async def _start(self) -> None:
+        self._pw = await async_playwright().start()
+        self._browser = await self._pw.chromium.launch(
+            channel=self._channel, headless=self._headless
+        )
 
     async def __aexit__(
         self,

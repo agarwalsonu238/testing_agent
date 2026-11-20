@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # --- Claude Code (headless, developer's own subscription) ---
     claude_bin: str = "claude"
-    claude_code_version: str = "2.1.323"  # pinned; re-check headless auth after every upgrade
+    claude_code_version: str = "2.1.328"  # pinned; re-check headless auth after every upgrade
     claude_model: str | None = None  # empty = Claude Code's default for the login
     claude_run_timeout_s: int = 1200
     claude_code_oauth_token: SecretStr | None = None  # optional, from `claude setup-token`

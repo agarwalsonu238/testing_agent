@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Pinned to CLAUDE_CODE_VERSION in .env.example — re-check headless subscription login
 # (CLAUDE_CODE_OAUTH_TOKEN, from `claude setup-token` run locally) after bumping either.
-RUN npm install -g @anthropic-ai/claude-code@2.1.323
+RUN npm install -g @anthropic-ai/claude-code@2.1.328
 
 # Install dependencies first (cached layer), then the project itself
 COPY pyproject.toml uv.lock ./

@@ -18,7 +18,7 @@ class FakeClaude(ClaudeCode):
         self.smoke_calls = 0
 
     async def version(self) -> str | None:
-        return "2.1.323"
+        return "2.1.328"
 
     async def auth_status(self) -> dict[str, Any] | None:
         return {"loggedIn": True, "authMethod": self.method, "subscriptionType": "pro"}

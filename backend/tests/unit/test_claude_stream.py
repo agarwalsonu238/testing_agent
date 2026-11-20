@@ -25,7 +25,7 @@ def _events() -> list[dict[str, object]]:
             "type": "system",
             "subtype": "init",
             "apiKeySource": "none",
-            "claude_code_version": "2.1.323",
+            "claude_code_version": "2.1.328",
         },
         {
             "type": "assistant",
