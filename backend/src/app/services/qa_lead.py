@@ -10,6 +10,7 @@ because nothing changed in the repo.
 """
 
 import asyncio
+import json
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -19,7 +20,7 @@ from pydantic import ValidationError
 from app.core.errors import BlockedError, PreconditionError
 from app.integrations import git
 from app.schemas.qa_config import ChangeRules
-from app.schemas.runs import RunMode
+from app.schemas.runs import RunMode, TestCase
 from app.services.agents import (
     API_CHECKER,
     CODE_REVIEWER,
@@ -130,13 +131,15 @@ async def run_check_change(
         ctx.event(f"No changes since {base}; testing the described flow only", level="warn")
 
     plan = await _lead_plan(ctx, deps, mode=mode, changes=changes, flow_hint=flow)
-    scenarios = plan.scenarios or ([flow] if flow else [])
+    store_test_cases(ctx, plan, FUNCTIONALITY_TESTER, [flow] if flow else [])
+    func_cases = [c for c in ctx.record.test_cases if c.agent == FUNCTIONALITY_TESTER]
+    scenarios = [case_text(c) for c in func_cases]
     review_agents = summary.agents  # Code reviewer / Design reviewer; functionality runs below
 
     lines = [plan.summary.strip()] if plan.summary.strip() else []
-    if scenarios:
-        lines.append(f"Test case scenarios ({len(scenarios)}):")
-        lines += [f"  {i}. {_first_line(s)}" for i, s in enumerate(scenarios, 1)]
+    if ctx.record.test_cases:
+        lines.append(f"Test cases ({len(ctx.record.test_cases)}), planned before testing:")
+        lines += [f"  {c.id} [{c.agent}] {c.title}" for c in ctx.record.test_cases]
     if review_agents:
         lines.append("Also reviewing: " + ", ".join(review_agents))
     ctx.record.plan_summary = "\n".join(lines)
@@ -156,7 +159,8 @@ async def run_check_change(
                 deps,
                 AgentCall(
                     agent=get_agent(s, FUNCTIONALITY_TESTER),
-                    task=f"Test case scenario {i} of {len(scenarios)}:\n{scenario}",
+                    task=f"Test case {i} of {len(scenarios)}:\n{scenario}",
+                    context=cases_context([func_cases[i - 1]]),
                     mode=mode,
                     # Distinct evidence folder per scenario: without it, scenario 2's
                     # screenshots and recorder log would overwrite scenario 1's.
@@ -176,7 +180,7 @@ async def run_check_change(
                     agent=get_agent(s, name),
                     task="Review this change against the repo's guidelines and skills." + focus,
                     mode=mode,
-                    context=changes,
+                    context=changes + cases_context(_cases_for(ctx, name)),
                 ),
             )
         elif name == DESIGN_REVIEWER:
@@ -190,9 +194,68 @@ async def run_check_change(
                     task="Compare the frontend's API calls with the backend's routes for this "
                     "change.",
                     mode=mode,
-                    context=changes,
+                    context=changes + cases_context(_cases_for(ctx, name)),
                 ),
             )
+
+
+def store_test_cases(
+    ctx: RunContext, plan: LeadPlan, fallback_agent: str, fallback: list[str]
+) -> None:
+    """Save the planned test cases on the run and in `test-cases.json` (before anything runs)."""
+    cases: list[TestCase] = []
+    for pc in plan.test_cases:
+        agent = pc.agent if pc.agent in _CASE_AGENTS else fallback_agent
+        cases.append(
+            TestCase(
+                id=f"TC-{len(cases) + 1}",
+                title=pc.title.strip()[:200] or "Untitled case",
+                agent=agent,
+                steps=[x.strip() for x in pc.steps if x.strip()],
+                expected=pc.expected.strip(),
+            )
+        )
+    if not cases:  # the lead gave no structured cases: the older free-text scenarios
+        for text in plan.scenarios or fallback:
+            cases.append(
+                TestCase(
+                    id=f"TC-{len(cases) + 1}",
+                    title=_first_line(text),
+                    agent=fallback_agent,
+                    steps=[text],
+                )
+            )
+    ctx.record.test_cases = cases
+    path = ctx.dir / "test-cases.json"
+    path.write_text(json.dumps([c.model_dump() for c in cases], indent=2))
+    ctx.add_artifact("Test cases (planned first)", path, "log")
+    ctx.event(f"{len(cases)} test case(s) planned and saved before testing", source=QA_LEAD)
+    ctx.save()
+
+
+def case_text(case: TestCase) -> str:
+    steps = "\n".join(f"  {i}. {x}" for i, x in enumerate(case.steps, 1))
+    return f"{case.id}: {case.title}\n{steps}\nExpected: {case.expected}".strip()
+
+
+def cases_context(cases: list[TestCase]) -> list[str]:
+    if not cases:
+        return []
+    return [
+        "",
+        "## Planned test cases (written before testing: execute exactly these)",
+        *[case_text(c) for c in cases],
+        "In your reply, fill `case_results` with one entry per case ID above: pass, fail, "
+        "blocked or skipped, with a one-line note. A case passes only if its Expected result "
+        "was actually observed.",
+    ]
+
+
+_CASE_AGENTS = {FUNCTIONALITY_TESTER, API_CHECKER, CODE_REVIEWER, DESIGN_REVIEWER}
+
+
+def _cases_for(ctx: RunContext, agent: str) -> list[TestCase]:
+    return [c for c in ctx.record.test_cases if c.agent == agent]
 
 
 def _first_line(text: str) -> str:
@@ -204,9 +267,23 @@ def _first_line(text: str) -> str:
 
 
 async def _lead_plan(
-    ctx: RunContext, deps: AgentDeps, *, mode: RunMode, changes: list[str], flow_hint: str | None
+    ctx: RunContext,
+    deps: AgentDeps,
+    *,
+    mode: RunMode,
+    changes: list[str],
+    flow_hint: str | None,
+    target_agent: str | None = None,
 ) -> LeadPlan:
-    if changes:
+    if target_agent:
+        ask = (
+            f"Write ALL the test cases for this request first, before anything is tested. The "
+            f"{target_agent} will execute them, so set every case's agent to {target_agent}. "
+            "Cover the normal path, then edge, empty, invalid-input and failure cases (for an "
+            "API: each status code, filters, pagination, bad parameters, auth). Each case has a "
+            "title, numbered steps and an Expected result. Leave design_routes empty."
+        )
+    elif changes:
         ask = (
             "Plan the checks for this change: list the routes whose UI changed (for the Design "
             "reviewer) and suggest what the Code reviewer should focus on. Then write 1-4 "
@@ -297,6 +374,21 @@ async def run_single_agent(
 ) -> None:
     """Run one agent on demand (e.g. Design reviewer on /pricing)."""
     s = deps.settings
+    if agent in (QA_LEAD, "test-writer"):
+        raise PreconditionError(f"{agent} runs from Check my change / Save as test, not on its own")
+    # Always first: turn the developer's prompt into a full list of test cases, store it, and
+    # only then let the agent execute them.
+    ctx.event(f"Planning test cases for {agent} before testing", source=QA_LEAD)
+    plan = await _lead_plan(
+        ctx,
+        deps,
+        mode=mode,
+        changes=[],
+        flow_hint=task,
+        target_agent=agent,
+    )
+    store_test_cases(ctx, plan, agent, [task])
+    cases = cases_context(_cases_for(ctx, agent))
     if agent == DESIGN_REVIEWER:
         if not route:
             raise PreconditionError("The Design reviewer needs a route, e.g. /pricing")
@@ -307,6 +399,7 @@ async def run_single_agent(
             )
         call = design_call(deps, route, mode, designs)
         call.task = f"{call.task}\n{task}"
+        call.context += cases
     elif agent in (CODE_REVIEWER, API_CHECKER):
         repo = s.app_repo_path
         has_repo = repo is not None and await git.is_repo(repo)
@@ -336,9 +429,9 @@ async def run_single_agent(
                     "check the code if it is available, and report real problems only.",
                     *agent_notes(refs),
                 ]
-        call = AgentCall(agent=get_agent(s, agent), task=task, mode=mode, context=context)
-    elif agent in (QA_LEAD, "test-writer"):
-        raise PreconditionError(f"{agent} runs from Check my change / Save as test, not on its own")
+        call = AgentCall(agent=get_agent(s, agent), task=task, mode=mode, context=context + cases)
     else:
-        call = AgentCall(agent=get_agent(s, agent), task=task, mode=mode, route=route)
+        call = AgentCall(
+            agent=get_agent(s, agent), task=task, mode=mode, route=route, context=cases
+        )
     await run_review_agent(ctx, deps, call)

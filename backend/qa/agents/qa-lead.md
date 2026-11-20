@@ -35,3 +35,8 @@ Rules:
 - Base everything on the code you read. If you can't tell which route changed, say so in the
   summary instead of guessing.
 - Always return at least one scenario when you were given something to test (a diff or a flow).
+
+Output: put every case in `test_cases` (title, agent, steps, expected). Use agent
+`functionality-tester` for UI flows, `api-checker` for API endpoints, `code-reviewer` or
+`design-reviewer` otherwise. When told which agent will run the cases, use only that agent. Write
+up to 8 cases covering normal, edge, invalid-input and failure paths.

@@ -166,10 +166,21 @@ export type RunSummary = {
   counts: RunCounts;
 };
 
+export type TestCase = {
+  id: string;
+  title: string;
+  agent: string;
+  steps: string[];
+  expected: string;
+  status: "planned" | "pass" | "fail" | "blocked" | "skipped";
+  note: string | null;
+};
+
 export type RunDetail = Omit<RunSummary, "mode"> & {
   blocked_reason: string | null;
   params: RunParams;
   plan_summary: string | null;
+  test_cases: TestCase[];
   agents: AgentResult[];
   findings: Finding[];
   artifacts: Artifact[];

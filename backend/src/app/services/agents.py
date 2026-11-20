@@ -245,6 +245,12 @@ class ReportedStep(BaseModel):
     note: str | None = None
 
 
+class ReportedCase(BaseModel):
+    id: str
+    status: Literal["pass", "fail", "blocked", "skipped"] = "skipped"
+    note: str | None = None
+
+
 class AgentReport(BaseModel):
     summary: str = ""
 
@@ -255,6 +261,7 @@ class AgentReport(BaseModel):
 
     findings: list[ReportedFinding] = []
     steps: list[ReportedStep] = []
+    case_results: list[ReportedCase] = []
 
 
 REPORT_SCHEMA: dict[str, Any] = {
@@ -284,6 +291,20 @@ REPORT_SCHEMA: dict[str, Any] = {
                         "description": "Absolute screenshot paths in the evidence folder, "
                         "or short quotes",
                     },
+                },
+            },
+        },
+        "case_results": {
+            "type": "array",
+            "description": "One entry per planned test case ID (TC-1 ...) you were given: "
+            "pass, fail, blocked or skipped, with a one-line note",
+            "items": {
+                "type": "object",
+                "required": ["id", "status"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"enum": ["pass", "fail", "blocked", "skipped"]},
+                    "note": {"type": "string"},
                 },
             },
         },
@@ -655,6 +676,18 @@ def copy_designs(settings: Settings, route: str, run_dir: Path) -> dict[str, Pat
     return copied
 
 
+def _apply_case_results(ctx: RunContext, agent: str, results: list[ReportedCase]) -> None:
+    """Record the agent's pass/fail per planned test case; cases it never mentioned are skipped."""
+    by_id = {r.id.strip().upper(): r for r in results}
+    for case in ctx.record.test_cases:
+        if case.agent != agent or case.status != "planned":
+            continue
+        reported = by_id.get(case.id.upper())
+        case.status = reported.status if reported else "skipped"
+        case.note = reported.note if reported else "The agent did not report this case"
+    ctx.save()
+
+
 async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) -> AgentResult:
     """Run a reviewing/testing agent, store its findings and evidence, and return its result.
 
@@ -701,6 +734,7 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
         ctx.add_agent_result(result)
         return result
 
+    _apply_case_results(ctx, name, report.case_results)
     findings = report_to_findings(report, name, ctx.dir, call.designs)
     for check in run.checks:
         if not check.passed and call.agent.name == FUNCTIONALITY_TESTER:
@@ -755,8 +789,16 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
     return result
 
 
+class PlannedCase(BaseModel):
+    title: str
+    agent: str = FUNCTIONALITY_TESTER
+    steps: list[str] = []
+    expected: str = ""
+
+
 class LeadPlan(BaseModel):
     summary: str = ""
+    test_cases: list[PlannedCase] = Field(default_factory=list)
     design_routes: list[str] = Field(default_factory=list)
     scenarios: list[str] = Field(default_factory=list)
     code_review_focus: str | None = None
@@ -771,6 +813,25 @@ LEAD_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string", "pattern": "^/"},
             "description": "Routes whose UI changed (max 3)",
+        },
+        "test_cases": {
+            "type": "array",
+            "description": "Every test case for this request, written BEFORE anything is "
+            "tested: the normal path first, then edge and failure cases. 1-8 cases.",
+            "items": {
+                "type": "object",
+                "required": ["title", "agent", "steps", "expected"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "agent": {
+                        "type": "string",
+                        "description": "Which agent runs it: functionality-tester (UI flows), "
+                        "api-checker (API endpoints), code-reviewer or design-reviewer",
+                    },
+                    "steps": {"type": "array", "items": {"type": "string"}},
+                    "expected": {"type": "string"},
+                },
+            },
         },
         "scenarios": {
             "type": "array",

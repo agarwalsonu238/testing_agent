@@ -232,6 +232,33 @@ export function RunReport() {
         </section>
       )}
 
+      {data.test_cases.length > 0 && (
+        <section aria-labelledby="cases-heading" className="grid gap-2">
+          <h2 id="cases-heading" className="text-lg font-semibold">
+            Test cases (planned first, {data.test_cases.length})
+          </h2>
+          <ul className="grid gap-2">
+            {data.test_cases.map((c) => (
+              <li key={c.id} className="rounded-lg border p-3 text-sm">
+                <p className="font-medium">
+                  {c.id} · {c.title} <Tag>{c.status}</Tag>
+                </p>
+                <p className="text-muted-foreground">{c.agent}</p>
+                {c.steps.length > 0 && (
+                  <ol className="ml-5 list-decimal">
+                    {c.steps.map((st, i) => (
+                      <li key={i}>{st}</li>
+                    ))}
+                  </ol>
+                )}
+                {c.expected && <p>Expected: {c.expected}</p>}
+                {c.note && <p className="text-muted-foreground">{c.note}</p>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {data.saved_test && (
         <section aria-labelledby="saved-heading" className="grid gap-1 rounded-xl border p-4 text-sm">
           <h2 id="saved-heading" className="font-semibold">

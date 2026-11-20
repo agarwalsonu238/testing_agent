@@ -130,11 +130,12 @@ async def test_check_change_tests_a_described_flow_even_with_no_diff(
 
     detail = (await client.get(f"/api/v1/runs/{run_id}")).json()
     assert fake.agents_called == ["qa-lead", "functionality-tester", "functionality-tester"]
-    assert "Test case scenarios (2)" in detail["plan_summary"]
+    assert "Test cases (2), planned before testing" in detail["plan_summary"]
+    assert [c["id"] for c in detail["test_cases"]] == ["TC-1", "TC-2"]
     assert len(detail["agents"]) == 2
     assert all(a["agent"] == "functionality-tester" for a in detail["agents"])
-    assert "scenario 1 of 2" in detail["agents"][0]["task"].lower()
-    assert "scenario 2 of 2" in detail["agents"][1]["task"].lower()
+    assert "test case 1 of 2" in detail["agents"][0]["task"].lower()
+    assert "test case 2 of 2" in detail["agents"][1]["task"].lower()
 
 
 async def test_check_change_with_nothing_to_check_runs_no_agents(
@@ -241,3 +242,58 @@ async def test_qa_config_lists_agents_and_pages(client: AsyncClient) -> None:
 async def test_saved_tests_need_an_app_repo(client: AsyncClient) -> None:
     response = await client.get("/api/v1/saved-tests")
     assert response.status_code == 412
+
+
+async def test_single_agent_plans_and_stores_test_cases_before_running(
+    client: AsyncClient, app: FastAPI, settings: Settings, tmp_path: Path
+) -> None:
+    """Every agent run: the QA Lead writes all test cases first (saved in test-cases.json),
+    then the agent runs them and its per-case results land on the cases."""
+    settings.app_repo_path = tmp_path / "app-repo"
+    await _init_repo_with_no_pending_changes(settings.app_repo_path)
+    fake = _FakeClaudeCode(
+        {
+            "qa-lead": {
+                "summary": "API checks",
+                "design_routes": [],
+                "test_cases": [
+                    {
+                        "title": "List products",
+                        "agent": "api-checker",
+                        "steps": ["GET /api/v1/products"],
+                        "expected": "200 and a list",
+                    },
+                    {
+                        "title": "Bad page number",
+                        "agent": "api-checker",
+                        "steps": ["GET /api/v1/products?page=-1"],
+                        "expected": "400 or 422",
+                    },
+                ],
+            },
+            "api-checker": {
+                "summary": "Checked.",
+                "findings": [],
+                "case_results": [{"id": "TC-1", "status": "pass"}],
+            },
+        }
+    )
+    app.dependency_overrides[get_claude] = lambda: fake
+    try:
+        response = await client.post(
+            "/api/v1/runs/agent",
+            json={"agent": "api-checker", "task": "Test the products API", "mode": "real"},
+        )
+        assert response.status_code == 202
+        run_id = response.json()["id"]
+        await _wait(app)
+    finally:
+        del app.dependency_overrides[get_claude]
+
+    detail = (await client.get(f"/api/v1/runs/{run_id}")).json()
+    assert fake.agents_called == ["qa-lead", "api-checker"]  # planning always comes first
+    assert [(c["id"], c["status"]) for c in detail["test_cases"]] == [
+        ("TC-1", "pass"),
+        ("TC-2", "skipped"),  # the agent never reported it
+    ]
+    assert any(a["path"] == "test-cases.json" for a in detail["artifacts"])

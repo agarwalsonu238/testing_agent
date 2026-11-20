@@ -72,6 +72,24 @@ class AgentResult(BaseModel):
     work_dir: str = ""
 
 
+CaseStatus = Literal["planned", "pass", "fail", "blocked", "skipped"]
+
+
+class TestCase(BaseModel):
+    """One planned test case. The QA Lead writes all of them before any agent runs; the agent
+    then executes them and reports a result per case ID."""
+
+    __test__ = False  # not a pytest class
+
+    id: str  # TC-1, TC-2 ...
+    title: str
+    agent: str  # the agent that executes it
+    steps: list[str] = []
+    expected: str = ""
+    status: CaseStatus = "planned"
+    note: str | None = None
+
+
 class Artifact(BaseModel):
     label: str
     path: str
@@ -146,6 +164,7 @@ class RunRecord(BaseModel):
     finished_at: datetime | None = None
     params: RunParams = RunParams()
     plan_summary: str | None = None  # QA Lead's plan
+    test_cases: list[TestCase] = []  # planned first, stored in test-cases.json in the run folder
     agents: list[AgentResult] = []
     findings: list[Finding] = []
     artifacts: list[Artifact] = []
