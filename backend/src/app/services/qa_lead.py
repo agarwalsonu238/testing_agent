@@ -35,6 +35,7 @@ from app.services.agents import (
     invoke_agent,
     run_review_agent,
 )
+from app.services.api_reference import agent_notes, build_references
 from app.services.run_manager import RunContext
 
 MAX_DESIGN_ROUTES = 3
@@ -321,6 +322,20 @@ async def run_single_agent(
         else:
             # The API checker can test a pasted endpoint live without any local checkout.
             context = ["", "No local repository is configured: test the endpoint live only."]
+        if agent == API_CHECKER:
+            refs = await build_references(task, deps.probe, ctx.dir)
+            if refs:
+                ctx.record.api_references.extend(refs)
+                ctx.save()
+                context += [
+                    "",
+                    "## Already measured by the QA backend (exact, shown on the report page)",
+                    "The run page already lists every key with its type and which common "
+                    "parameters changed the response, so do NOT repeat key tables or re-test "
+                    "those parameters. Your job: a short plain-language answer to the task, "
+                    "check the code if it is available, and report real problems only.",
+                    *agent_notes(refs),
+                ]
         call = AgentCall(agent=get_agent(s, agent), task=task, mode=mode, context=context)
     elif agent in (QA_LEAD, "test-writer"):
         raise PreconditionError(f"{agent} runs from Check my change / Save as test, not on its own")

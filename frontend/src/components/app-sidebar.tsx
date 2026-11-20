@@ -5,8 +5,7 @@ import {
   CircleCheck,
   CircleExclamationPoint,
   Clock,
-  FlaskConical,
-  Inbox,
+    Inbox,
   Play,
   ScanSearch,
   ShieldCheck,
@@ -110,9 +109,6 @@ export function AppSidebar() {
           </NavLink>
           <NavLink href="/runs" icon={<Clock />} active={pathname.startsWith("/runs")}>
             Runs
-          </NavLink>
-          <NavLink href="/saved-tests" icon={<FlaskConical />} active={pathname === "/saved-tests"}>
-            Saved tests
           </NavLink>
           <NavLink href="/setup" icon={<ShieldCheck />} active={pathname === "/setup"}>
             Setup check

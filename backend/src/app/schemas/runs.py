@@ -100,6 +100,39 @@ class RunParams(BaseModel):
     test_id: str | None = None
 
 
+class ApiField(BaseModel):
+    key: str  # e.g. "data[].price"
+    type: str  # e.g. "number", "string or null"
+    example: str = ""
+
+
+ApiEffect = Literal["changes result", "changes order", "no visible effect", "rejected", "error"]
+
+
+class ApiParam(BaseModel):
+    name: str
+    value: str  # the value that was tried
+    effect: ApiEffect
+    detail: str = ""
+
+
+class ApiReference(BaseModel):
+    """What the QA backend measured by calling one GET endpoint (shown as a Swagger-style table)."""
+
+    url: str
+    status: int | None = None
+    content_type: str = ""
+    time_ms: int | None = None
+    size_bytes: int | None = None
+    is_json: bool = False
+    error: str | None = None  # set when the endpoint could not be reached
+    item_count: int | None = None  # items in the main list of the response
+    total: int | None = None  # total reported by the API's pagination, when there is one
+    fields: list[ApiField] = []
+    params: list[ApiParam] = []
+    raw_file: str | None = None  # relative to the run folder
+
+
 class RunRecord(BaseModel):
     """Everything stored in a run folder's `run.json`."""
 
@@ -116,6 +149,7 @@ class RunRecord(BaseModel):
     agents: list[AgentResult] = []
     findings: list[Finding] = []
     artifacts: list[Artifact] = []
+    api_references: list[ApiReference] = []
     saved_test: SavedTestInfo | None = None
 
 

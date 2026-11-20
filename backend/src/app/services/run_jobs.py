@@ -103,8 +103,10 @@ async def start_agent_run(manager: RunManager, deps: AgentDeps, req: AgentRunReq
     _ensure_subscription(deps)
     deps = retarget(deps, req)
     get_agent(deps.settings, req.agent)
+    # The API checker and Code reviewer never use the mock layer, so "mocked" would be misleading.
+    mode = "real" if req.agent in ("api-checker", "code-reviewer") else req.mode
     params = RunParams(
-        mode=req.mode,
+        mode=mode,
         agent=req.agent,
         task=req.task,
         route=req.route,
@@ -114,7 +116,7 @@ async def start_agent_run(manager: RunManager, deps: AgentDeps, req: AgentRunReq
 
     async def job(ctx: RunContext) -> None:
         await run_single_agent(
-            ctx, deps, agent=req.agent, task=req.task, route=req.route, mode=req.mode
+            ctx, deps, agent=req.agent, task=req.task, route=req.route, mode=mode
         )
 
     return await manager.start("agent", title, params, job)

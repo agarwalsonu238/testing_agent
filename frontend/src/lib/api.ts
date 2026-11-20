@@ -108,6 +108,28 @@ export type AgentResult = {
 
 export type Artifact = { label: string; path: string; kind: EvidenceKind };
 
+export type ApiField = { key: string; type: string; example: string };
+export type ApiParam = {
+  name: string;
+  value: string;
+  effect: "changes result" | "changes order" | "no visible effect" | "rejected" | "error";
+  detail: string;
+};
+export type ApiReference = {
+  url: string;
+  status: number | null;
+  content_type: string;
+  time_ms: number | null;
+  size_bytes: number | null;
+  is_json: boolean;
+  error: string | null;
+  item_count: number | null;
+  total: number | null;
+  fields: ApiField[];
+  params: ApiParam[];
+  raw_file: string | null;
+};
+
 export type SavedTestInfo = {
   test_id: string;
   file: string;
@@ -119,6 +141,8 @@ export type SavedTestInfo = {
 
 export type RunParams = {
   mode: RunMode;
+  app_url: string | null;
+  app_repo_path: string | null;
   agent: string | null;
   task: string | null;
   route: string | null;
@@ -149,6 +173,7 @@ export type RunDetail = Omit<RunSummary, "mode"> & {
   agents: AgentResult[];
   findings: Finding[];
   artifacts: Artifact[];
+  api_references: ApiReference[];
   saved_test: SavedTestInfo | null;
   counts: RunCounts;
   report_summary: string;

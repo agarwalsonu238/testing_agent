@@ -7,7 +7,6 @@ const MODES = [
   ["Quick Scan", "No", "Every page at desktop and mobile size: console, network, images, links, layout", "After any change"],
   ["Check my change", "Yes", "QA Lead reads your diff and runs the right agents", "Before opening a PR"],
   ["One agent", "Yes", "Run a single agent, e.g. Design reviewer on /pricing", "When you know what to check"],
-  ["Saved test", "No", "Re-runs a saved flow as a normal Playwright test", "Before every push"],
 ];
 
 const VERDICTS = [
@@ -34,7 +33,6 @@ export default function GuidePage() {
           <li>Run <Link className="underline underline-offset-4" href="/scan">Quick Scan</Link>. Fix anything marked High.</li>
           <li>Click <Link className="underline underline-offset-4" href="/check">Check my change</Link>, or run one agent. For the Functionality tester, describe the flow as numbered steps ending with an Expected line.</li>
           <li>Work through <Link className="underline underline-offset-4" href="/">To review</Link>: Accept (a bug to fix) or Ignore (with a reason, so it is skipped next time).</li>
-          <li>When a new flow passes, click <strong>Save as test</strong> on its report.</li>
           <li>Copy the report summary into the PR description.</li>
         </ol>
       </section>

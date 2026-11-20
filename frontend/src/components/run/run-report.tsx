@@ -1,18 +1,27 @@
 "use client";
 
-import { Copy, ExternalLink } from "lucide-react";
+import { Copy, ExternalLink, RotateCw } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { Tag, VerdictBadge } from "@/components/badges";
 import { FindingCard } from "@/components/finding-card";
+import { ApiReferenceView } from "@/components/run/api-reference-view";
 import { AgentResultCard } from "@/components/run/agent-result-card";
 import { RunLog } from "@/components/run/run-log";
-import { SaveTestForm } from "@/components/run/save-test-form";
 import { Button } from "@/components/ui/button";
 import { useApiData } from "@/hooks/use-api-data";
-import { cancelRun, getRun, getRunEvents, runFileUrl, type RunDetail } from "@/lib/api";
+import {
+  cancelRun,
+  getRun,
+  getRunEvents,
+  runFileUrl,
+  startAgentRun,
+  startCheckChange,
+  startQuickScan,
+  type RunDetail,
+} from "@/lib/api";
 
 const POLL_MS = 1500;
 
@@ -45,6 +54,54 @@ function CopyButton({ text }: { text: string }) {
     >
       <Copy aria-hidden /> {copied ? "Copied" : "Copy"}
     </Button>
+  );
+}
+
+/** Start the same run again with the same prompt and settings. Not offered for runs built from another run. */
+function RerunButton({ run }: { run: RunDetail }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const p = run.params;
+  const target = { app_url: p.app_url ?? undefined, app_repo_path: p.app_repo_path ?? undefined };
+  const start = () => {
+    if (run.kind === "agent" && p.agent && p.task) {
+      return startAgentRun({ agent: p.agent, task: p.task, route: p.route ?? undefined, mode: p.mode, ...target });
+    }
+    if (run.kind === "check-change") {
+      return startCheckChange({ mode: p.mode, base_ref: p.base_ref ?? undefined, flow: p.flow ?? undefined, ...target });
+    }
+    if (run.kind === "quick-scan") return startQuickScan(p.mode, target);
+    return null;
+  };
+  if (!["agent", "check-change", "quick-scan"].includes(run.kind)) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      <Button
+        size="sm"
+        disabled={busy}
+        onClick={() => {
+          const request = start();
+          if (!request) return;
+          setBusy(true);
+          setError(null);
+          request.then(
+            (next) => router.push(`/runs/${next.id}`),
+            (err: unknown) => {
+              setError(err instanceof Error ? err.message : String(err));
+              setBusy(false);
+            },
+          );
+        }}
+      >
+        <RotateCw aria-hidden /> {busy ? "Starting…" : "Run again"}
+      </Button>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -137,6 +194,7 @@ export function RunReport() {
           {duration(data) && ` · took ${duration(data)}`} · {data.counts.open} open of {data.counts.total} finding
           {data.counts.total === 1 ? "" : "s"}
         </p>
+        {!running && <RerunButton run={data} />}
         {running && (
           <div className="flex items-center gap-3">
             <Button
@@ -193,7 +251,16 @@ export function RunReport() {
         </section>
       )}
 
-      {data.can_save_as_test && <SaveTestForm runId={data.id} />}
+      {data.api_references.length > 0 && (
+        <section aria-labelledby="api-heading" className="grid gap-3">
+          <h2 id="api-heading" className="text-lg font-semibold">
+            API in plain words
+          </h2>
+          {data.api_references.map((ref) => (
+            <ApiReferenceView key={ref.url} runId={data.id} reference={ref} />
+          ))}
+        </section>
+      )}
 
       {data.agents.length > 0 && (
         <section aria-labelledby="agents-heading" className="grid gap-3">

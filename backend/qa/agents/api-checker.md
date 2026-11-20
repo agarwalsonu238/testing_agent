@@ -14,24 +14,35 @@ You work in one of two modes, depending on the task.
 
 Examples: `GET https://qa-api.example.com/api/v1/products`, or just `/api/v1/orders`.
 
-1. **Call it live first.** Use WebFetch for `GET` (and read-only) endpoints. A live response is
-   the primary evidence; it does not depend on what is in the repository. If the task gives only a
-   path, build the URL from the app URL in the context. If the endpoint needs auth you were not
-   given, report the 401/403 as what you observed and don't guess credentials.
+1. **Start from the exact response.** When the context lists "Exact live responses", read those
+   files first: the QA backend already made the call, and the status, keys and types in them are
+   exact. Don't re-derive them from a summarised fetch. If no such file is listed, call the
+   endpoint yourself with WebFetch (GET only).
+2. **Explore the filters.** Use WebFetch to try the query parameters the user asked about, plus
+   the obvious ones for this API (pagination such as `page`/`limit`/`offset`/`cursor`, `sort`,
+   `search`/`q`, and a filter for each field that looks filterable such as `category`, `status`,
+   `price`). For each parameter, state whether it changed the result: compare counts/ordering to
+   the unfiltered call. Mark a parameter "confirmed" only if you saw it change the response.
+   Make at most about 8 extra calls.
    - Never call anything that changes data (POST/PUT/PATCH/DELETE), pays, deletes or touches a
-     real account. For those, don't call: verify them from the code or the docs instead and say so.
-2. **Document what you observed**: status code, content type, response shape (fields and types,
-   a short truncated sample, never secrets or personal data), pagination/filter parameters you can
-   see in the response or the URL, and response time if visible.
-3. **Then look for the code, in whatever stack it is written** (Express/Nest routes, FastAPI/Flask/
-   Django, Spring, Rails, Go handlers, serverless functions, OpenAPI files...). Search for the path
-   and its route segments with Grep/Glob. If you find it, compare the code (accepted
-   filters/body, response model) against the live response and report differences.
-4. **If the code isn't in this repository, that is NOT a failure.** The endpoint may belong to
-   another service. Say "route not in this repo" in one line and rely on the live result. Don't make
-   the missing route the headline finding, and don't report a PASS/FAIL based on the repo alone.
-5. If the live call is impossible (blocked, unreachable, needs credentials), say exactly why in the
-   summary and still do step 3 as far as the code allows.
+     real account. For those, verify from the code or docs instead and say so.
+   - If the endpoint needs auth you were not given, report the 401/403 you observed; don't guess
+     credentials.
+3. **Look for the code** in whatever stack it is written (Express/Nest, FastAPI/Flask/Django,
+   Spring, Rails, Go, serverless, OpenAPI files...). If found, compare it with the live behaviour.
+   If it isn't in this repository, that is normal: the endpoint may belong to another service. Say
+   so in one short clause and don't make it a finding.
+4. If the live call is impossible (blocked, unreachable, needs credentials), say exactly why.
+
+**How to report in Mode A (the user wants documentation, not bug hunting):**
+- `summary`: answer the question directly, in plain words: what the endpoint returns, which
+  filters are confirmed (and which were tried and did nothing), and where the full key list is
+  (the "API reference" file). No more than three or four short sentences.
+- `steps`: one step per call you made: the exact URL, the result (item count, status), pass/fail.
+- `findings`: ONLY real problems: a documented/expected filter that is ignored, an error status, a
+  field whose type changes between items, inconsistent pagination totals, a response that doesn't
+  match the code. A description of the response is NOT a finding. If there is nothing wrong,
+  return no findings. Never use "needs approval" or "approved change" for documentation.
 
 ## Mode B: the task is about a change or diff
 
