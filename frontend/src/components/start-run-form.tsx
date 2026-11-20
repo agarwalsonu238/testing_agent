@@ -34,6 +34,8 @@ export function StartRunForm({ variant }: { variant: Variant }) {
   const [text, setText] = useState("");
   const [route, setRoute] = useState("");
   const [baseRef, setBaseRef] = useState("");
+  const [appUrl, setAppUrl] = useState("");
+  const [repoPath, setRepoPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,14 +48,19 @@ export function StartRunForm({ variant }: { variant: Variant }) {
     setBusy(true);
     setError(null);
     try {
+      const target = {
+        app_url: appUrl.trim() || undefined,
+        app_repo_path: repoPath.trim() || undefined,
+      };
       let run: RunDetail;
       if (variant.kind === "quick-scan") {
-        run = await startQuickScan(mode);
+        run = await startQuickScan(mode, target);
       } else if (variant.kind === "check-change") {
         run = await startCheckChange({
           mode,
           base_ref: baseRef.trim() || undefined,
           flow: text.trim() || undefined,
+          ...target,
         });
       } else {
         run = await startAgentRun({
@@ -61,6 +68,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
           task: text.trim(),
           route: route.trim() || undefined,
           mode,
+          ...target,
         });
       }
       router.push(`/runs/${run.id}`);
@@ -73,6 +81,40 @@ export function StartRunForm({ variant }: { variant: Variant }) {
   const errorId = `${id}-error`;
   return (
     <form onSubmit={submit} className="grid max-w-2xl gap-5" aria-describedby={error ? errorId : undefined}>
+      <fieldset className="grid gap-3 rounded-lg border p-4">
+        <legend className="px-1 text-sm font-medium">Project to test (optional)</legend>
+        <div className="grid gap-1">
+          <label htmlFor={`${id}-app-url`} className={labelClass}>
+            App URL
+          </label>
+          <input
+            id={`${id}-app-url`}
+            className={`${fieldClass} font-mono`}
+            value={appUrl}
+            maxLength={500}
+            pattern="https?://\S+"
+            onChange={(e) => setAppUrl(e.target.value)}
+            placeholder="https://my-app.example.com"
+          />
+        </div>
+        <div className="grid gap-1">
+          <label htmlFor={`${id}-repo`} className={labelClass}>
+            Project folder
+          </label>
+          <input
+            id={`${id}-repo`}
+            className={`${fieldClass} font-mono`}
+            value={repoPath}
+            maxLength={1000}
+            onChange={(e) => setRepoPath(e.target.value)}
+            placeholder="/Users/you/Desktop/GitHub/my-project"
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Any project, any stack. Leave both empty to use the server&apos;s default (APP_URL and APP_REPO_PATH).
+        </p>
+      </fieldset>
+
       {variant.kind === "check-change" && (
         <>
           <div className="grid gap-1">
@@ -132,7 +174,9 @@ export function StartRunForm({ variant }: { variant: Variant }) {
               placeholder={
                 variant.agent === "functionality-tester"
                   ? "1. Open the home page.\n2. …\nExpected: no console errors and no failed API calls."
-                  : "Describe what to check"
+                  : variant.agent === "api-checker"
+                    ? "Paste an endpoint to test, e.g. GET https://api.example.com/v1/products\nor describe the API change to check. Works for any project."
+                    : "Describe what to check"
               }
             />
           </div>
@@ -154,7 +198,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
         </>
       )}
 
-      {/* Mode is meaningless for the two static-analysis agents — neither opens a browser. */}
+      {/* Mode is meaningless for the two agents that never open the app in a browser. */}
       {variant.kind !== "agent" || !["code-reviewer", "api-checker"].includes(variant.agent) ? (
         <ModePicker value={mode} onChange={setMode} disabled={busy} />
       ) : null}

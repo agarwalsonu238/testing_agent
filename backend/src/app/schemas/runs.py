@@ -89,6 +89,8 @@ class SavedTestInfo(BaseModel):
 
 class RunParams(BaseModel):
     mode: RunMode = "mocked"
+    app_url: str | None = None  # per-run target; None = the server's APP_URL
+    app_repo_path: str | None = None  # per-run target; None = the server's APP_REPO_PATH
     agent: str | None = None
     task: str | None = None
     route: str | None = None
@@ -156,17 +158,25 @@ class RunEventsResponse(BaseModel):
 # --- Requests ---
 
 
-class QuickScanRequest(BaseModel):
+class TargetRequest(BaseModel):
+    """Which project to test. Both optional: omitted fields fall back to the server's
+    APP_URL / APP_REPO_PATH, so one QA agent can test any project, run by run."""
+
+    app_url: str | None = Field(default=None, max_length=500, pattern=r"^https?://\S+$")
+    app_repo_path: str | None = Field(default=None, max_length=1000)
+
+
+class QuickScanRequest(TargetRequest):
     mode: RunMode = "mocked"
 
 
-class CheckChangeRequest(BaseModel):
+class CheckChangeRequest(TargetRequest):
     mode: RunMode = "mocked"
     base_ref: str | None = Field(default=None, max_length=200, pattern=r"^[\w./~^@{}-]+$")
     flow: str | None = Field(default=None, max_length=4000)
 
 
-class AgentRunRequest(BaseModel):
+class AgentRunRequest(TargetRequest):
     agent: str = Field(pattern=AGENT_NAME_PATTERN)
     task: str = Field(min_length=3, max_length=4000)
     route: str | None = Field(default=None, pattern=r"^/[^\s]*$", max_length=300)

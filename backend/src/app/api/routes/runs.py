@@ -27,7 +27,7 @@ FindingId = Annotated[str, Path(pattern=r"^f\d{1,5}$")]
 
 @router.post("/quick-scan", response_model=RunDetail, status_code=status.HTTP_202_ACCEPTED)
 async def start_quick_scan(body: QuickScanRequest, manager: ManagerDep, deps: DepsDep) -> RunDetail:
-    return to_detail(await run_jobs.start_quick_scan(manager, deps, body.mode))
+    return to_detail(await run_jobs.start_quick_scan(manager, deps, body.mode, body))
 
 
 @router.post("/check-change", response_model=RunDetail, status_code=status.HTTP_202_ACCEPTED)

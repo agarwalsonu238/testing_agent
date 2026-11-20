@@ -2,6 +2,7 @@
 the job to the RunManager."""
 
 from datetime import datetime
+from pathlib import Path
 
 from app.core.errors import PreconditionError
 from app.integrations.claude_code import ClaudeCodeError
@@ -13,8 +14,10 @@ from app.schemas.runs import (
     RunParams,
     RunRecord,
     SaveTestRequest,
+    TargetRequest,
 )
 from app.services.agents import AgentDeps, get_agent
+from app.services.qa_config import load_qa_config
 from app.services.qa_lead import run_check_change, run_single_agent
 from app.services.quick_scan import run_quick_scan
 from app.services.run_manager import RunContext, RunManager
@@ -31,9 +34,45 @@ def _ensure_subscription(deps: AgentDeps) -> None:
         raise PreconditionError(str(exc)) from exc
 
 
-async def start_quick_scan(manager: RunManager, deps: AgentDeps, mode: str) -> RunRecord:
+def retarget(deps: AgentDeps, target: TargetRequest) -> AgentDeps:
+    """Deps for a run that tests a different project than the server's default one.
+
+    The app URL and repo folder come from the request when given; the project's own mocks file
+    is re-read from the chosen repo. Raises PreconditionError for a folder that doesn't exist.
+    """
+    if not target.app_url and not target.app_repo_path:
+        return deps
+    update: dict[str, object] = {}
+    if target.app_url:
+        update["app_url"] = target.app_url.strip()
+    if target.app_repo_path:
+        repo = Path(target.app_repo_path).expanduser()
+        if not repo.is_dir():
+            raise PreconditionError(f"Project folder not found: {repo}")
+        update["app_repo_path"] = repo
+    settings = deps.settings.model_copy(update=update)
+    return AgentDeps(
+        settings=settings, qa=load_qa_config(settings), claude=deps.claude, probe=deps.probe
+    )
+
+
+def _target_params(deps: AgentDeps, target: TargetRequest) -> dict[str, str | None]:
+    changed = bool(target.app_url or target.app_repo_path)
+    return {
+        "app_url": deps.settings.app_url if changed else None,
+        "app_repo_path": str(deps.settings.app_repo_path)
+        if changed and deps.settings.app_repo_path
+        else None,
+    }
+
+
+async def start_quick_scan(
+    manager: RunManager, deps: AgentDeps, mode: str, target: TargetRequest | None = None
+) -> RunRecord:
     """Start Quick Scan (no AI). Raises ConflictError when a run is active."""
-    params = RunParams(mode="real" if mode == "real" else "mocked")
+    target = target or TargetRequest()
+    deps = retarget(deps, target)
+    params = RunParams(mode="real" if mode == "real" else "mocked", **_target_params(deps, target))
 
     async def job(ctx: RunContext) -> None:
         await run_quick_scan(
@@ -48,7 +87,10 @@ async def start_check_change(
 ) -> RunRecord:
     """Start Check my change. Raises PreconditionError (API key set) or ConflictError."""
     _ensure_subscription(deps)
-    params = RunParams(mode=req.mode, base_ref=req.base_ref, flow=req.flow)
+    deps = retarget(deps, req)
+    params = RunParams(
+        mode=req.mode, base_ref=req.base_ref, flow=req.flow, **_target_params(deps, req)
+    )
 
     async def job(ctx: RunContext) -> None:
         await run_check_change(ctx, deps, mode=req.mode, base_ref=req.base_ref, flow=req.flow)
@@ -59,8 +101,15 @@ async def start_check_change(
 async def start_agent_run(manager: RunManager, deps: AgentDeps, req: AgentRunRequest) -> RunRecord:
     """Run one agent. Raises NotFoundError (unknown agent), PreconditionError or ConflictError."""
     _ensure_subscription(deps)
+    deps = retarget(deps, req)
     get_agent(deps.settings, req.agent)
-    params = RunParams(mode=req.mode, agent=req.agent, task=req.task, route=req.route)
+    params = RunParams(
+        mode=req.mode,
+        agent=req.agent,
+        task=req.task,
+        route=req.route,
+        **_target_params(deps, req),
+    )
     title = f"{req.agent}" + (f" · {req.route}" if req.route else "")
 
     async def job(ctx: RunContext) -> None:

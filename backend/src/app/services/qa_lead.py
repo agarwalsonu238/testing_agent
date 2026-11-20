@@ -308,18 +308,20 @@ async def run_single_agent(
         call.task = f"{call.task}\n{task}"
     elif agent in (CODE_REVIEWER, API_CHECKER):
         repo = s.app_repo_path
-        if repo is None or not await git.is_repo(repo):
+        has_repo = repo is not None and await git.is_repo(repo)
+        if not has_repo and agent == CODE_REVIEWER:
             raise PreconditionError("APP_REPO_PATH must point at the app's git repository")
-        since = await git.merge_base(repo, s.diff_base) or "HEAD"
-        diff_path = ctx.dir / "diff.patch"
-        await asyncio.to_thread(diff_path.write_text, await git.diff(repo, since))
-        ctx.add_artifact("Diff", diff_path, "code")
-        call = AgentCall(
-            agent=get_agent(s, agent),
-            task=task,
-            mode=mode,
-            context=["", "## Change under review", f"- Diff against {s.diff_base}: {diff_path}"],
-        )
+        context: list[str] = []
+        if has_repo and repo is not None:
+            since = await git.merge_base(repo, s.diff_base) or "HEAD"
+            diff_path = ctx.dir / "diff.patch"
+            await asyncio.to_thread(diff_path.write_text, await git.diff(repo, since))
+            ctx.add_artifact("Diff", diff_path, "code")
+            context = ["", "## Change under review", f"- Diff against {s.diff_base}: {diff_path}"]
+        else:
+            # The API checker can test a pasted endpoint live without any local checkout.
+            context = ["", "No local repository is configured: test the endpoint live only."]
+        call = AgentCall(agent=get_agent(s, agent), task=task, mode=mode, context=context)
     elif agent in (QA_LEAD, "test-writer"):
         raise PreconditionError(f"{agent} runs from Check my change / Save as test, not on its own")
     else:

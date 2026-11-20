@@ -212,11 +212,17 @@ export const getRunEvents = (id: string, after: number, init?: RequestInit) =>
   );
 export const cancelRun = (id: string) => post<RunDetail>(`/runs/${encodeURIComponent(id)}/cancel`);
 
-export const startQuickScan = (mode: RunMode) => post<RunDetail>("/runs/quick-scan", { mode });
-export const startCheckChange = (body: { mode: RunMode; base_ref?: string; flow?: string }) =>
-  post<RunDetail>("/runs/check-change", body);
-export const startAgentRun = (body: { agent: string; task: string; route?: string; mode: RunMode }) =>
-  post<RunDetail>("/runs/agent", body);
+/** Which project to test. Omitted fields fall back to the server's APP_URL / APP_REPO_PATH. */
+export type RunTarget = { app_url?: string; app_repo_path?: string };
+
+export const startQuickScan = (mode: RunMode, target: RunTarget = {}) =>
+  post<RunDetail>("/runs/quick-scan", { mode, ...target });
+export const startCheckChange = (
+  body: { mode: RunMode; base_ref?: string; flow?: string } & RunTarget,
+) => post<RunDetail>("/runs/check-change", body);
+export const startAgentRun = (
+  body: { agent: string; task: string; route?: string; mode: RunMode } & RunTarget,
+) => post<RunDetail>("/runs/agent", body);
 export const saveAsTest = (runId: string, body: { title?: string; folder?: "isolated" | "live" }) =>
   post<RunDetail>(`/runs/${encodeURIComponent(runId)}/save-test`, body);
 
