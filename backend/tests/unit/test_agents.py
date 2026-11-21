@@ -37,6 +37,8 @@ def test_shipped_agents_load_and_reviewers_cannot_write() -> None:
         "code-reviewer",
         "api-checker",
         "test-writer",
+        "test-case-reviewer",
+        "qa-reporter",
     }
     for name in (
         "qa-lead",
@@ -44,10 +46,21 @@ def test_shipped_agents_load_and_reviewers_cannot_write() -> None:
         "functionality-tester",
         "code-reviewer",
         "api-checker",
+        "test-case-reviewer",
+        "qa-reporter",
     ):
         allowed, disallowed = permission_rules(agents[name])
         assert not {"Write", "Edit", "Bash"} & set(allowed)
         assert {"Write", "Edit", "Bash"} <= set(disallowed)
+
+
+def test_reviewer_and_reporter_have_no_tools() -> None:
+    """The test-case reviewer and the reporter see only their prompt (cases + observations) -
+    no Read/Glob/Grep/MCP, so there is nothing on disk for them to reach even by accident."""
+    agents = load_agents(QA_DIR / "agents")
+    for name in ("test-case-reviewer", "qa-reporter"):
+        assert agents[name].tools == []
+        assert agents[name].mcp == []
 
 
 def test_test_writer_may_only_write_in_the_test_folder() -> None:

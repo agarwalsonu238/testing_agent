@@ -1,12 +1,15 @@
-"""Check my change: the QA Lead plans test case scenarios, then the right agents run them.
+"""Check my change: the QA Lead (Writer) plans test cases, a Reviewer tightens or rejects them,
+then the right agents execute them and a Reporter writes up each one's findings.
 
 Which review agents run is a fixed rule (plan section 2): UI files → Design reviewer, logic/API
-files → API checker, every change → Code reviewer. The QA Lead agent adds the details the rule
-can't: which routes changed, what the code review should focus on, and — always the first thing
-that runs — a numbered list of test case scenarios (the normal path plus edge cases) for the
-Functionality tester. Scenarios are planned whenever there's a diff or a developer-described
-flow to test, even when there's no diff at all: a flow to test is never silently skipped just
-because nothing changed in the repo.
+files → API checker, every change → Code reviewer. The QA Lead is the only agent that ever sees
+the diff or the flow text; it writes a self-contained test case for every agent that will run.
+The Reviewer then tightens or rejects each draft case before anything is stored or executed.
+Every executor (Functionality tester, API checker, Code reviewer, Design reviewer) works only
+from its assigned case(s) and reports facts; a Reporter turns those facts into the polished
+finding. Cases are planned whenever there's a diff or a developer-described flow to test, even
+when there's no diff at all: a flow to test is never silently skipped just because nothing
+changed in the repo.
 """
 
 import asyncio
@@ -28,9 +31,14 @@ from app.services.agents import (
     FUNCTIONALITY_TESTER,
     LEAD_SCHEMA,
     QA_LEAD,
+    REVIEW_SCHEMA,
+    TEST_CASE_REVIEWER,
     AgentCall,
     AgentDeps,
     LeadPlan,
+    PlannedCase,
+    ReviewedCase,
+    ReviewResult,
     copy_designs,
     get_agent,
     invoke_agent,
@@ -131,8 +139,9 @@ async def run_check_change(
         ctx.event(f"No changes since {base}; testing the described flow only", level="warn")
 
     plan = await _lead_plan(ctx, deps, mode=mode, changes=changes, flow_hint=flow)
-    store_test_cases(ctx, plan, FUNCTIONALITY_TESTER, [flow] if flow else [])
-    func_cases = [c for c in ctx.record.test_cases if c.agent == FUNCTIONALITY_TESTER]
+    reviewed = await _review_cases(ctx, deps, mode, plan.test_cases)
+    store_test_cases(ctx, plan, reviewed, FUNCTIONALITY_TESTER, [flow] if flow else [])
+    func_cases = _cases_for(ctx, FUNCTIONALITY_TESTER)
     scenarios = [case_text(c) for c in func_cases]
     review_agents = summary.agents  # Code reviewer / Design reviewer; functionality runs below
 
@@ -172,19 +181,18 @@ async def run_check_change(
 
     for name in review_agents:
         if name == CODE_REVIEWER:
-            focus = f"\nFocus on: {plan.code_review_focus}" if plan.code_review_focus else ""
             await run_review_agent(
                 ctx,
                 deps,
                 AgentCall(
                     agent=get_agent(s, name),
-                    task="Review this change against the repo's guidelines and skills." + focus,
+                    task="Review this change against the repo's guidelines and skills.",
                     mode=mode,
-                    context=changes + cases_context(_cases_for(ctx, name)),
+                    context=cases_context(_cases_for(ctx, name)),
                 ),
             )
         elif name == DESIGN_REVIEWER:
-            await _design_reviews(ctx, deps, mode, plan.design_routes, changes)
+            await _design_reviews(ctx, deps, mode, plan.design_routes)
         elif name == API_CHECKER:
             await run_review_agent(
                 ctx,
@@ -194,25 +202,95 @@ async def run_check_change(
                     task="Compare the frontend's API calls with the backend's routes for this "
                     "change.",
                     mode=mode,
-                    context=changes + cases_context(_cases_for(ctx, name)),
+                    context=cases_context(_cases_for(ctx, name)),
                 ),
             )
 
 
+async def _review_cases(
+    ctx: RunContext, deps: AgentDeps, mode: RunMode, drafts: list[PlannedCase]
+) -> list[ReviewedCase]:
+    """Have the Reviewer tighten or reject each draft case before anything is stored or run.
+
+    The Reviewer never sees the diff or the flow text — only the cases themselves. Falls back to
+    the drafts, unreviewed, when the Reviewer gives no usable reply.
+    """
+    as_written = [
+        ReviewedCase(title=c.title, agent=c.agent, steps=c.steps, expected=c.expected)
+        for c in drafts
+    ]
+    if not drafts:
+        return as_written
+    run = await invoke_agent(
+        ctx,
+        deps,
+        AgentCall(
+            agent=get_agent(deps.settings, TEST_CASE_REVIEWER),
+            task="Review these draft test cases before anything is tested.",
+            mode=mode,
+            context=[
+                "",
+                "## Draft test cases",
+                json.dumps([c.model_dump() for c in drafts]),
+            ],
+            schema=REVIEW_SCHEMA,
+        ),
+    )
+    if not run.result.ok or run.result.structured is None:
+        ctx.event(
+            f"Test case reviewer gave no result ({run.result.error or 'no JSON reply'}); using "
+            "the drafts as written",
+            level="warn",
+        )
+        return as_written
+    try:
+        result = ReviewResult.model_validate(run.result.structured)
+    except ValidationError:
+        ctx.event(
+            "Test case reviewer's reply didn't match the format; using the drafts as written",
+            level="warn",
+        )
+        return as_written
+    if len(result.cases) != len(drafts):
+        ctx.event(
+            "Test case reviewer returned a different number of cases; using the drafts as written",
+            level="warn",
+        )
+        return as_written
+    changed = sum(1 for c in result.cases if c.review_status != "approved")
+    ctx.event(
+        f"Test case reviewer: {changed} of {len(result.cases)} case(s) changed",
+        source=TEST_CASE_REVIEWER,
+    )
+    return result.cases
+
+
 def store_test_cases(
-    ctx: RunContext, plan: LeadPlan, fallback_agent: str, fallback: list[str]
+    ctx: RunContext,
+    plan: LeadPlan,
+    reviewed: list[ReviewedCase],
+    fallback_agent: str,
+    fallback: list[str],
 ) -> None:
-    """Save the planned test cases on the run and in `test-cases.json` (before anything runs)."""
+    """Save the reviewed test cases on the run and in `test-cases.json` (before anything runs).
+
+    A rejected case is stored `skipped` with the reviewer's reason as its note, and is never
+    handed to an executor (see `_cases_for`).
+    """
     cases: list[TestCase] = []
-    for pc in plan.test_cases:
-        agent = pc.agent if pc.agent in _CASE_AGENTS else fallback_agent
+    for rc in reviewed:
+        agent = rc.agent if rc.agent in _CASE_AGENTS else fallback_agent
+        rejected = rc.review_status == "rejected"
         cases.append(
             TestCase(
                 id=f"TC-{len(cases) + 1}",
-                title=pc.title.strip()[:200] or "Untitled case",
+                title=rc.title.strip()[:200] or "Untitled case",
                 agent=agent,
-                steps=[x.strip() for x in pc.steps if x.strip()],
-                expected=pc.expected.strip(),
+                steps=[x.strip() for x in rc.steps if x.strip()],
+                expected=rc.expected.strip(),
+                status="skipped" if rejected else "planned",
+                note=rc.review_note if rejected else None,
+                review_note=None if rejected else rc.review_note,
             )
         )
     if not cases:  # the lead gave no structured cases: the older free-text scenarios
@@ -245,9 +323,9 @@ def cases_context(cases: list[TestCase]) -> list[str]:
         "",
         "## Planned test cases (written before testing: execute exactly these)",
         *[case_text(c) for c in cases],
-        "In your reply, fill `case_results` with one entry per case ID above: pass, fail, "
-        "blocked or skipped, with a one-line note. A case passes only if its Expected result "
-        "was actually observed.",
+        "Every case above needs a result in your reply: pass, fail, blocked or skipped, with a "
+        "one-line note of what you observed. A case passes only if its Expected result was "
+        "actually observed.",
     ]
 
 
@@ -255,7 +333,9 @@ _CASE_AGENTS = {FUNCTIONALITY_TESTER, API_CHECKER, CODE_REVIEWER, DESIGN_REVIEWE
 
 
 def _cases_for(ctx: RunContext, agent: str) -> list[TestCase]:
-    return [c for c in ctx.record.test_cases if c.agent == agent]
+    """This agent's cases that are actually runnable — a case the Reviewer rejected is `skipped`
+    from the start and never reaches an executor."""
+    return [c for c in ctx.record.test_cases if c.agent == agent and c.status == "planned"]
 
 
 def _first_line(text: str) -> str:
@@ -285,19 +365,16 @@ async def _lead_plan(
         )
     elif changes:
         ask = (
-            "Plan the checks for this change: list the routes whose UI changed (for the Design "
-            "reviewer) and suggest what the Code reviewer should focus on. Then write 1-4 "
-            "concrete test case scenarios for the Functionality tester: the normal path first, "
-            "then the important edge cases the change implies. Each scenario is a short numbered "
-            "plain-English flow ending with an Expected: line."
+            "Plan the checks for this change: list the routes whose UI changed (for "
+            "design_routes), then write a self-contained test case for every agent that will "
+            "run — the normal path first, then the important edge cases the change implies."
         )
     else:
         ask = (
             "There is no local code diff to check — only a flow the developer wants tested in "
-            "the running app. Turn it into 1-4 concrete test case scenarios for the "
-            "Functionality tester: the normal path first, then the important edge cases it "
-            "implies. Each scenario is a short numbered plain-English flow ending with an "
-            "Expected: line. Leave design_routes empty and don't suggest a code review focus."
+            "the running app. Turn it into 1-4 concrete test cases for the Functionality tester: "
+            "the normal path first, then the important edge cases it implies. Leave "
+            "design_routes empty."
         )
     context = list(changes)
     if flow_hint:
@@ -316,6 +393,9 @@ async def _lead_plan(
                 mode=mode,
                 context=context,
                 schema=LEAD_SCHEMA,
+                # The Writer is the only role allowed to see diff.patch; every other call in
+                # this run gets a narrower (usually empty) add_dirs.
+                add_dirs=[ctx.dir],
             ),
         )
         if run.result.ok and run.result.structured is not None:
@@ -331,13 +411,14 @@ async def _lead_plan(
 
 
 async def _design_reviews(
-    ctx: RunContext, deps: AgentDeps, mode: RunMode, routes: list[str], changes: list[str]
+    ctx: RunContext, deps: AgentDeps, mode: RunMode, routes: list[str]
 ) -> None:
     s = deps.settings
     clean = [r for r in dict.fromkeys(routes) if r.startswith("/")][:MAX_DESIGN_ROUTES]
     if not clean:
         ctx.event("Design reviewer skipped: the QA Lead found no changed route", level="warn")
         return
+    cases = cases_context(_cases_for(ctx, DESIGN_REVIEWER))
     for route in clean:
         designs = copy_designs(s, route, ctx.dir)
         if not designs and not s.figma_mcp_url:
@@ -345,7 +426,9 @@ async def _design_reviews(
                 f"Design reviewer skipped {route}: no design PNG in {s.designs_dir}", level="warn"
             )
             continue
-        await run_review_agent(ctx, deps, design_call(deps, route, mode, designs, changes))
+        call = design_call(deps, route, mode, designs)
+        call.context += cases
+        await run_review_agent(ctx, deps, call)
 
 
 def design_call(
@@ -353,19 +436,25 @@ def design_call(
     route: str,
     mode: RunMode,
     designs: dict[str, Path],
-    changes: list[str] | None = None,
 ) -> AgentCall:
-    url = f"{deps.settings.app_url.rstrip('/')}{route}"
+    s = deps.settings
+    url = f"{s.app_url.rstrip('/')}{route}"
     design_lines = [f"- Design ({v}): {p}" for v, p in designs.items()] or [
         "- No PNG for this route: use the Figma MCP server to get the design frame."
     ]
+    # The design-reviewer needs Read access to its copied design PNG(s), nothing else from the
+    # run folder — never the diff, which lives in the run folder's root.
+    add_dirs = list({p.parent for p in designs.values()})
+    if s.designs_dir.is_dir():
+        add_dirs.append(s.designs_dir.resolve())
     return AgentCall(
         agent=get_agent(deps.settings, DESIGN_REVIEWER),
         task=f"Compare {url} with its design at desktop (1440x900) and mobile (390x844) size.",
         mode=mode,
         route=route,
         designs=designs,
-        context=["", "## Designs", *design_lines, *(changes or [])],
+        context=["", "## Designs", *design_lines],
+        add_dirs=add_dirs,
     )
 
 
@@ -376,18 +465,33 @@ async def run_single_agent(
     s = deps.settings
     if agent in (QA_LEAD, "test-writer"):
         raise PreconditionError(f"{agent} runs from Check my change / Save as test, not on its own")
-    # Always first: turn the developer's prompt into a full list of test cases, store it, and
-    # only then let the agent execute them.
+
+    # Any local diff goes to the Writer (below), never straight to the executor: the Writer is
+    # the only role allowed to read it, and turns what matters into the case it writes.
+    changes: list[str] = []
+    if agent in (CODE_REVIEWER, API_CHECKER):
+        repo = s.app_repo_path
+        has_repo = repo is not None and await git.is_repo(repo)
+        if not has_repo and agent == CODE_REVIEWER:
+            raise PreconditionError("APP_REPO_PATH must point at the app's git repository")
+        if has_repo and repo is not None:
+            since = await git.merge_base(repo, s.diff_base) or "HEAD"
+            diff_path = ctx.dir / "diff.patch"
+            await asyncio.to_thread(diff_path.write_text, await git.diff(repo, since))
+            ctx.add_artifact("Diff", diff_path, "code")
+            changes = ["", "## Change under review", f"- Diff against {s.diff_base}: {diff_path}"]
+        elif agent == API_CHECKER:
+            # The API checker can test a pasted endpoint live without any local checkout.
+            changes = ["", "No local repository is configured: test the endpoint live only."]
+
+    # Always first: turn the developer's prompt (and any diff) into a full list of test cases,
+    # review them, store the result, and only then let the agent execute them.
     ctx.event(f"Planning test cases for {agent} before testing", source=QA_LEAD)
     plan = await _lead_plan(
-        ctx,
-        deps,
-        mode=mode,
-        changes=[],
-        flow_hint=task,
-        target_agent=agent,
+        ctx, deps, mode=mode, changes=changes, flow_hint=task, target_agent=agent
     )
-    store_test_cases(ctx, plan, agent, [task])
+    reviewed = await _review_cases(ctx, deps, mode, plan.test_cases)
+    store_test_cases(ctx, plan, reviewed, agent, [task])
     cases = cases_context(_cases_for(ctx, agent))
     if agent == DESIGN_REVIEWER:
         if not route:
@@ -401,20 +505,7 @@ async def run_single_agent(
         call.task = f"{call.task}\n{task}"
         call.context += cases
     elif agent in (CODE_REVIEWER, API_CHECKER):
-        repo = s.app_repo_path
-        has_repo = repo is not None and await git.is_repo(repo)
-        if not has_repo and agent == CODE_REVIEWER:
-            raise PreconditionError("APP_REPO_PATH must point at the app's git repository")
         context: list[str] = []
-        if has_repo and repo is not None:
-            since = await git.merge_base(repo, s.diff_base) or "HEAD"
-            diff_path = ctx.dir / "diff.patch"
-            await asyncio.to_thread(diff_path.write_text, await git.diff(repo, since))
-            ctx.add_artifact("Diff", diff_path, "code")
-            context = ["", "## Change under review", f"- Diff against {s.diff_base}: {diff_path}"]
-        else:
-            # The API checker can test a pasted endpoint live without any local checkout.
-            context = ["", "No local repository is configured: test the endpoint live only."]
         if agent == API_CHECKER:
             refs = await build_references(task, deps.probe, ctx.dir)
             if refs:

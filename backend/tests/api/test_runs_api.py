@@ -12,6 +12,7 @@ from app.core.config import Settings
 from app.integrations import git
 from app.integrations.claude_code import AgentInvocation, ClaudeRunResult, ProgressFn
 from app.schemas.runs import AgentResult, Finding, RunParams
+from app.services.agents import QA_LEAD
 from app.services.run_manager import RunManager
 
 
@@ -73,6 +74,7 @@ class _FakeClaudeCode:
     def __init__(self, replies: dict[str, dict[str, Any]]) -> None:
         self._replies = replies
         self.agents_called: list[str] = []
+        self.invocations: list[AgentInvocation] = []
 
     def ensure_no_billed_credentials(self) -> None:
         return None
@@ -81,6 +83,7 @@ class _FakeClaudeCode:
         self, inv: AgentInvocation, on_progress: ProgressFn, timeout_s: float | None = None
     ) -> ClaudeRunResult:
         self.agents_called.append(inv.agent)
+        self.invocations.append(inv)
         return ClaudeRunResult(ok=True, structured=self._replies.get(inv.agent, {}))
 
 
@@ -113,7 +116,8 @@ async def test_check_change_tests_a_described_flow_even_with_no_diff(
                     "stay active.",
                 ],
             },
-            "functionality-tester": {"summary": "Checked.", "findings": [], "steps": []},
+            "functionality-tester": {"case_observations": [], "steps": []},
+            "qa-reporter": {"summary": "Checked.", "findings": [], "steps": []},
         }
     )
     app.dependency_overrides[get_claude] = lambda: fake
@@ -129,13 +133,28 @@ async def test_check_change_tests_a_described_flow_even_with_no_diff(
         del app.dependency_overrides[get_claude]
 
     detail = (await client.get(f"/api/v1/runs/{run_id}")).json()
-    assert fake.agents_called == ["qa-lead", "functionality-tester", "functionality-tester"]
+    # No structured test_cases from the Lead (only free-text scenarios), so the reviewer is
+    # skipped; each functionality-tester (executor) call is followed by its own reporter call.
+    assert fake.agents_called == [
+        "qa-lead",
+        "functionality-tester",
+        "qa-reporter",
+        "functionality-tester",
+        "qa-reporter",
+    ]
     assert "Test cases (2), planned before testing" in detail["plan_summary"]
     assert [c["id"] for c in detail["test_cases"]] == ["TC-1", "TC-2"]
     assert len(detail["agents"]) == 2
     assert all(a["agent"] == "functionality-tester" for a in detail["agents"])
     assert "test case 1 of 2" in detail["agents"][0]["task"].lower()
     assert "test case 2 of 2" in detail["agents"][1]["task"].lower()
+
+    # The flow text the developer typed is for the Writer (qa-lead) alone — never the executor
+    # or the reporter.
+    flow_text = "Check the double-booking cancellation flow"
+    for inv in fake.invocations:
+        if inv.agent != QA_LEAD:
+            assert flow_text not in inv.prompt, f"{inv.agent}'s prompt mentions the flow text"
 
 
 async def test_check_change_with_nothing_to_check_runs_no_agents(
@@ -157,6 +176,109 @@ async def test_check_change_with_nothing_to_check_runs_no_agents(
     assert fake.agents_called == []
     assert detail["agents"] == []
     assert "nothing to check" in detail["plan_summary"]
+
+
+async def test_check_change_never_lets_the_diff_reach_anyone_but_the_lead(
+    client: AsyncClient, app: FastAPI, settings: Settings, tmp_path: Path
+) -> None:
+    """Only the Writer (qa-lead) may see diff.patch: every other call's `add_dirs` must not
+    reach it and its prompt must not mention it. A case the reviewer rejects must never reach
+    an executor."""
+    settings.app_repo_path = tmp_path / "app-repo"
+    await _init_repo_with_no_pending_changes(settings.app_repo_path)
+    await asyncio.to_thread(
+        (settings.app_repo_path / "api.py").write_text, "def handler():\n    return 1\n"
+    )
+    fake = _FakeClaudeCode(
+        {
+            "qa-lead": {
+                "summary": "Logic change.",
+                "design_routes": [],
+                "test_cases": [
+                    {
+                        "title": "Handler returns 1",
+                        "agent": "functionality-tester",
+                        "steps": ["1. Call the handler."],
+                        "expected": "Returns 1",
+                    },
+                    {
+                        "title": "Vague edge case",
+                        "agent": "functionality-tester",
+                        "steps": ["Make sure it's robust"],
+                        "expected": "it works",
+                    },
+                    {
+                        "title": "api.py:1",
+                        "agent": "code-reviewer",
+                        "steps": ["def handler(): return 1"],
+                        "expected": "Handler always returns 1",
+                    },
+                ],
+            },
+            "test-case-reviewer": {
+                "cases": [
+                    {
+                        "title": "Handler returns 1",
+                        "agent": "functionality-tester",
+                        "steps": ["1. Call the handler."],
+                        "expected": "Returns 1",
+                        "review_status": "approved",
+                    },
+                    {
+                        "title": "Vague edge case",
+                        "agent": "functionality-tester",
+                        "steps": ["Make sure it's robust"],
+                        "expected": "it works",
+                        "review_status": "rejected",
+                        "review_note": "Not a concrete step or a falsifiable expected result",
+                    },
+                    {
+                        "title": "api.py:1",
+                        "agent": "code-reviewer",
+                        "steps": ["def handler(): return 1"],
+                        "expected": "Handler always returns 1",
+                        "review_status": "approved",
+                    },
+                ],
+            },
+            "functionality-tester": {"case_observations": [], "steps": []},
+            "code-reviewer": {"case_observations": [], "steps": []},
+            "api-checker": {"case_observations": [], "steps": []},
+            "qa-reporter": {
+                "summary": "Checked.",
+                "findings": [],
+                "steps": [],
+                "case_results": [{"id": "TC-1", "status": "pass"}],
+            },
+        }
+    )
+    app.dependency_overrides[get_claude] = lambda: fake
+    try:
+        response = await client.post("/api/v1/runs/check-change", json={"mode": "mocked"})
+        run_id = response.json()["id"]
+        await _wait(app)
+    finally:
+        del app.dependency_overrides[get_claude]
+
+    detail = (await client.get(f"/api/v1/runs/{run_id}")).json()
+
+    # The rejected case is skipped from the start (TC-1 is the approved one), so only one
+    # functionality-tester call runs.
+    cases_by_title = {c["title"]: c for c in detail["test_cases"]}
+    assert cases_by_title["Vague edge case"]["status"] == "skipped"
+    assert cases_by_title["Vague edge case"]["note"] == (
+        "Not a concrete step or a falsifiable expected result"
+    )
+    assert cases_by_title["Handler returns 1"]["status"] == "pass"
+    assert fake.agents_called.count("functionality-tester") == 1
+
+    for inv in fake.invocations:
+        if inv.agent == "qa-lead":
+            continue  # the only role allowed to see diff.patch
+        assert not any((d / "diff.patch").exists() for d in inv.add_dirs), (
+            f"{inv.agent}'s add_dirs can reach diff.patch: {inv.add_dirs}"
+        )
+        assert "diff.patch" not in inv.prompt, f"{inv.agent}'s prompt mentions diff.patch"
 
 
 async def test_unknown_run_and_bad_ids_are_404_or_422(client: AsyncClient) -> None:
@@ -271,7 +393,35 @@ async def test_single_agent_plans_and_stores_test_cases_before_running(
                     },
                 ],
             },
+            "test-case-reviewer": {
+                "cases": [
+                    {
+                        "title": "List products",
+                        "agent": "api-checker",
+                        "steps": ["GET /api/v1/products"],
+                        "expected": "200 and a list",
+                        "review_status": "approved",
+                    },
+                    {
+                        "title": "Bad page number",
+                        "agent": "api-checker",
+                        "steps": ["GET /api/v1/products?page=-1"],
+                        "expected": "400 or 422",
+                        "review_status": "approved",
+                    },
+                ],
+            },
             "api-checker": {
+                "case_observations": [
+                    {
+                        "id": "TC-1",
+                        "status": "pass",
+                        "observed": "GET /api/v1/products returned 200 with a list",
+                    }
+                ],
+                "steps": [],
+            },
+            "qa-reporter": {
                 "summary": "Checked.",
                 "findings": [],
                 "case_results": [{"id": "TC-1", "status": "pass"}],
@@ -291,7 +441,9 @@ async def test_single_agent_plans_and_stores_test_cases_before_running(
         del app.dependency_overrides[get_claude]
 
     detail = (await client.get(f"/api/v1/runs/{run_id}")).json()
-    assert fake.agents_called == ["qa-lead", "api-checker"]  # planning always comes first
+    # Planning always comes first: the Lead writes cases, the Reviewer tightens or rejects them,
+    # then the executor runs them and the Reporter writes up the result.
+    assert fake.agents_called == ["qa-lead", "test-case-reviewer", "api-checker", "qa-reporter"]
     assert [(c["id"], c["status"]) for c in detail["test_cases"]] == [
         ("TC-1", "pass"),
         ("TC-2", "skipped"),  # the agent never reported it

@@ -88,6 +88,9 @@ class TestCase(BaseModel):
     expected: str = ""
     status: CaseStatus = "planned"
     note: str | None = None
+    # Set when the test-case reviewer rewrote this case (what changed) or rejected it (why);
+    # None for a case the reviewer approved unchanged, or when no review ran.
+    review_note: str | None = None
 
 
 class Artifact(BaseModel):
