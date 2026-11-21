@@ -138,12 +138,14 @@ async def run_check_change(
         # change against a live app): still plan and run the scenarios for it.
         ctx.event(f"No changes since {base}; testing the described flow only", level="warn")
 
-    plan = await _lead_plan(ctx, deps, mode=mode, changes=changes, flow_hint=flow)
+    review_agents = summary.agents  # Code reviewer / Design reviewer; functionality runs below
+    plan = await _lead_plan(
+        ctx, deps, mode=mode, changes=changes, flow_hint=flow, required_agents=review_agents
+    )
     reviewed = await _review_cases(ctx, deps, mode, plan.test_cases)
     store_test_cases(ctx, plan, reviewed, FUNCTIONALITY_TESTER, [flow] if flow else [])
     func_cases = _cases_for(ctx, FUNCTIONALITY_TESTER)
     scenarios = [case_text(c) for c in func_cases]
-    review_agents = summary.agents  # Code reviewer / Design reviewer; functionality runs below
 
     lines = [plan.summary.strip()] if plan.summary.strip() else []
     if ctx.record.test_cases:
@@ -354,6 +356,7 @@ async def _lead_plan(
     changes: list[str],
     flow_hint: str | None,
     target_agent: str | None = None,
+    required_agents: list[str] | None = None,
 ) -> LeadPlan:
     if target_agent:
         ask = (
@@ -361,13 +364,20 @@ async def _lead_plan(
             f"{target_agent} will execute them, so set every case's agent to {target_agent}. "
             "Cover the normal path, then edge, empty, invalid-input and failure cases (for an "
             "API: each status code, filters, pagination, bad parameters, auth). Each case has a "
-            "title, numbered steps and an Expected result. Leave design_routes empty."
+            "title, numbered steps and an Expected result. Leave design_routes empty. "
+            f"{target_agent} runs no matter what you write, so write at least one case for it "
+            "even if you find nothing wrong — a case confirming the safe behavior beats none."
         )
     elif changes:
+        required = ", ".join(required_agents or [CODE_REVIEWER])
         ask = (
             "Plan the checks for this change: list the routes whose UI changed (for "
             "design_routes), then write a self-contained test case for every agent that will "
-            "run — the normal path first, then the important edge cases the change implies."
+            "run — the normal path first, then the important edge cases the change implies. "
+            f"These agents run no matter what you write, so you must write at least one case "
+            f"for each of them even if you find nothing wrong: {required}. A case confirming "
+            "the safe behavior (name the file/route/endpoint and what should still be true of "
+            "it) beats leaving that agent with nothing to check."
         )
     else:
         ask = (
