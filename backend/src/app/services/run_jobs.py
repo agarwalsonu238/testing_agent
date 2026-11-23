@@ -52,7 +52,11 @@ def retarget(deps: AgentDeps, target: TargetRequest) -> AgentDeps:
         update["app_repo_path"] = repo
     settings = deps.settings.model_copy(update=update)
     return AgentDeps(
-        settings=settings, qa=load_qa_config(settings), claude=deps.claude, probe=deps.probe
+        settings=settings,
+        qa=load_qa_config(settings),
+        claude=deps.claude,
+        probe=deps.probe,
+        reviewer=deps.reviewer,
     )
 
 

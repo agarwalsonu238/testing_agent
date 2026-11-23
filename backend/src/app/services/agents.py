@@ -27,6 +27,7 @@ from app.integrations.claude_code import (
     ClaudeRunResult,
     ToolCall,
 )
+from app.integrations.external_reviewer import ExternalReviewer
 from app.integrations.http_probe import HttpProbe
 from app.schemas.qa_config import QaConfig
 from app.schemas.runs import (
@@ -344,6 +345,8 @@ class ReviewedCase(BaseModel):
     expected: str = ""
     review_status: ReviewStatus = "approved"
     review_note: str | None = None
+    # False for a draft nobody reviewed (the reviewer failed): it must not read as "approved".
+    reviewed: bool = True
 
 
 class ReviewResult(BaseModel):
@@ -600,6 +603,7 @@ class AgentDeps:
     qa: QaConfig
     claude: ClaudeCode
     probe: HttpProbe
+    reviewer: ExternalReviewer | None = None  # None = Claude reviews the test cases
 
 
 @dataclass
@@ -688,7 +692,7 @@ async def _storage_state(
 ) -> Path | None:
     needs_browser = mode == "real" and deps.qa.auth.login is not None
     if not needs_browser:
-        if mode == "mocked" and deps.qa.auth.mock_storage_state and deps.settings.app_repo_path:
+        if deps.qa.auth.mock_storage_state and deps.settings.app_repo_path:
             return deps.settings.app_repo_path / deps.qa.auth.mock_storage_state
         return None
     try:

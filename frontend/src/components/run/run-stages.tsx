@@ -253,6 +253,12 @@ export function ReviewStage({ run, onApproved }: { run: RunDetail; onApproved?: 
           </div>
         </div>
       )}
+      {run.reviewer && (
+        <p className="text-sm">
+          Reviewed by <strong>{run.reviewer}</strong>
+          {!run.reviewer.startsWith("Claude") && <span className="text-muted-foreground"> (a different AI from the one that wrote the cases)</span>}
+        </p>
+      )}
       {run.test_cases.length === 0 ? (
         <Empty>{running ? "Waiting for the plan before the cases can be reviewed…" : "No test cases to review."}</Empty>
       ) : (

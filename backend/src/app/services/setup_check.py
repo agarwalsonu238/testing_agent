@@ -7,6 +7,7 @@ from app.core.errors import PreconditionError
 from app.integrations import git
 from app.integrations.browser import BrowserUnavailableError, probe_browser
 from app.integrations.claude_code import ClaudeCode
+from app.integrations.external_reviewer import ExternalReviewer
 from app.integrations.http_probe import HttpProbe
 from app.integrations.process import ProcessError, run_process
 from app.schemas.setup import SetupCheck, SetupItem
@@ -169,6 +170,26 @@ async def _repo_item(settings: Settings) -> SetupItem:
     return SetupItem(key="app_repo", label=label, status="pass", detail=str(repo))
 
 
+def _reviewer_item(settings: Settings) -> SetupItem:
+    """Who reviews the test cases. The settings are already validated, so this only reports."""
+    reviewer = ExternalReviewer.from_settings(settings)
+    if reviewer is None:
+        return SetupItem(
+            key="reviewer",
+            label="Test case reviewer",
+            status="pass",
+            detail="Claude, the same login as the other agents "
+            "(set REVIEWER_PROVIDER to have Gemini, Perplexity or another AI review instead)",
+        )
+    return SetupItem(
+        key="reviewer",
+        label="Test case reviewer",
+        status="pass",
+        detail=f"{reviewer.label}. It is sent the draft test cases (never the diff or the "
+        "flow); if it fails, Claude reviews instead",
+    )
+
+
 def _config_items(settings: Settings) -> list[SetupItem]:
     items = []
     try:
@@ -235,5 +256,13 @@ async def run_setup_check(
         detail=detail,
         fix=None if reachable else "Start the app, or fix APP_URL in .env",
     )
-    items = [*claude_items, browser, node, app_item, repo, *_config_items(settings)]
+    items = [
+        *claude_items,
+        browser,
+        node,
+        app_item,
+        repo,
+        _reviewer_item(settings),
+        *_config_items(settings),
+    ]
     return SetupCheck(ready=not any(i.status == "fail" for i in items), items=items)

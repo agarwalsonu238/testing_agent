@@ -190,6 +190,8 @@ export type RunDetail = Omit<RunSummary, "mode"> & {
   activity: string | null;
   /** Paused until the developer approves the reviewed test cases. */
   awaiting_approval: boolean;
+  /** Who reviewed the test cases, e.g. "Gemini (gemini-2.5-pro)"; null when nobody did. */
+  reviewer: string | null;
   blocked_reason: string | null;
   params: RunParams;
   plan_summary: string | null;

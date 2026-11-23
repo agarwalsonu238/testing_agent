@@ -5,6 +5,7 @@ from fastapi import Depends, HTTPException, Request, status
 
 from app.core.config import Settings, get_settings
 from app.integrations.claude_code import ClaudeCode
+from app.integrations.external_reviewer import ExternalReviewer
 from app.integrations.http_probe import HttpProbe
 from app.schemas.qa_config import QaConfig
 from app.services.agents import AgentDeps
@@ -53,7 +54,13 @@ def get_agent_deps(
     claude: Annotated[ClaudeCode, Depends(get_claude)],
     probe: Annotated[HttpProbe, Depends(get_probe)],
 ) -> AgentDeps:
-    return AgentDeps(settings=settings, qa=qa, claude=claude, probe=probe)
+    return AgentDeps(
+        settings=settings,
+        qa=qa,
+        claude=claude,
+        probe=probe,
+        reviewer=ExternalReviewer.from_settings(settings),
+    )
 
 
 ManagerDep = Annotated[RunManager, Depends(get_run_manager)]

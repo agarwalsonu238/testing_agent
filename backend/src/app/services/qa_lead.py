@@ -22,6 +22,7 @@ from pydantic import ValidationError
 
 from app.core.errors import BlockedError, PreconditionError
 from app.integrations import git
+from app.integrations.external_reviewer import ExternalReviewer, ReviewerError, extract_json_object
 from app.schemas.qa_config import ChangeRules
 from app.schemas.runs import RunMode, TestCase
 from app.services.agents import (
@@ -249,20 +250,89 @@ async def _execute_then_report(ctx: RunContext, deps: AgentDeps, calls: list[Age
         await report_agent(ctx, deps, item)
 
 
+def _review_prompt(drafts: list[PlannedCase]) -> str:
+    return "\n".join(
+        [
+            "Review these draft test cases before anything is tested.",
+            "",
+            "## Draft test cases",
+            json.dumps([c.model_dump() for c in drafts]),
+            "",
+            "## Reply format",
+            "Reply with only one JSON object (no other text, no code fences) that matches this "
+            "JSON Schema:",
+            json.dumps(REVIEW_SCHEMA),
+        ]
+    )
+
+
+def _checked_review(
+    ctx: RunContext, drafts: list[PlannedCase], structured: object, who: str
+) -> list[ReviewedCase] | None:
+    """The reviewer's cases if they are usable (right format, one per draft), else None."""
+    try:
+        result = ReviewResult.model_validate(structured)
+    except ValidationError:
+        ctx.event(f"{who}'s reply didn't match the format", level="warn", source=TEST_CASE_REVIEWER)
+        return None
+    if len(result.cases) != len(drafts):
+        ctx.event(
+            f"{who} returned a different number of cases", level="warn", source=TEST_CASE_REVIEWER
+        )
+        return None
+    changed = sum(1 for c in result.cases if c.review_status != "approved")
+    ctx.event(f"{who}: {changed} of {len(result.cases)} case(s) changed", source=TEST_CASE_REVIEWER)
+    return result.cases
+
+
+async def _review_with_external(
+    ctx: RunContext, deps: AgentDeps, reviewer: ExternalReviewer, drafts: list[PlannedCase]
+) -> list[ReviewedCase] | None:
+    """Ask the configured non-Claude reviewer; None (with an event saying why) when it fails."""
+    instructions = get_agent(deps.settings, TEST_CASE_REVIEWER).prompt
+    ctx.event(
+        f"Sending the draft test cases to {reviewer.label} for review", source=TEST_CASE_REVIEWER
+    )
+    try:
+        reply = await reviewer.complete(instructions, _review_prompt(drafts))
+        structured = extract_json_object(reply)
+    except ReviewerError as exc:
+        ctx.event(f"{exc}", level="warn", source=TEST_CASE_REVIEWER)
+        return None
+    return _checked_review(ctx, drafts, structured, reviewer.label)
+
+
 async def _review_cases(
     ctx: RunContext, deps: AgentDeps, mode: RunMode, drafts: list[PlannedCase]
 ) -> list[ReviewedCase]:
-    """Have the Reviewer tighten or reject each draft case before anything is stored or run.
+    """Have a Reviewer tighten or reject each draft case before anything is stored or run.
 
-    The Reviewer never sees the diff or the flow text — only the cases themselves. Falls back to
-    the drafts, unreviewed, when the Reviewer gives no usable reply.
+    The Reviewer never sees the diff or the flow text — only the cases themselves. It is the
+    configured external provider (Gemini, Perplexity…) when REVIEWER_PROVIDER is set, otherwise
+    Claude; if the external one fails, Claude reviews instead. When nobody can review, the drafts
+    go on as written and are marked unreviewed. The run records who actually did the review.
     """
     as_written = [
-        ReviewedCase(title=c.title, agent=c.agent, steps=c.steps, expected=c.expected)
+        ReviewedCase(
+            title=c.title, agent=c.agent, steps=c.steps, expected=c.expected, reviewed=False
+        )
         for c in drafts
     ]
     if not drafts:
         return as_written
+    claude_label = "Claude"
+    if deps.reviewer is not None:
+        reviewed = await _review_with_external(ctx, deps, deps.reviewer, drafts)
+        if reviewed is not None:
+            ctx.record.reviewer = deps.reviewer.label
+            ctx.save()
+            return reviewed
+        ctx.event(
+            f"{deps.reviewer.name} could not review; Claude reviews the cases instead",
+            level="warn",
+            source=TEST_CASE_REVIEWER,
+        )
+        claude_label = f"Claude (instead of {deps.reviewer.name})"
     run = await invoke_agent(
         ctx,
         deps,
@@ -285,26 +355,13 @@ async def _review_cases(
             level="warn",
         )
         return as_written
-    try:
-        result = ReviewResult.model_validate(run.result.structured)
-    except ValidationError:
-        ctx.event(
-            "Test case reviewer's reply didn't match the format; using the drafts as written",
-            level="warn",
-        )
+    checked = _checked_review(ctx, drafts, run.result.structured, claude_label)
+    if checked is None:
+        ctx.event("Using the drafts as written", level="warn", source=TEST_CASE_REVIEWER)
         return as_written
-    if len(result.cases) != len(drafts):
-        ctx.event(
-            "Test case reviewer returned a different number of cases; using the drafts as written",
-            level="warn",
-        )
-        return as_written
-    changed = sum(1 for c in result.cases if c.review_status != "approved")
-    ctx.event(
-        f"Test case reviewer: {changed} of {len(result.cases)} case(s) changed",
-        source=TEST_CASE_REVIEWER,
-    )
-    return result.cases
+    ctx.record.reviewer = claude_label
+    ctx.save()
+    return checked
 
 
 def store_test_cases(
@@ -333,7 +390,7 @@ def store_test_cases(
                 status="skipped" if rejected else "planned",
                 note=rc.review_note if rejected else None,
                 review_note=None if rejected else rc.review_note,
-                review_status=rc.review_status,
+                review_status=rc.review_status if rc.reviewed else None,
             )
         )
     if not cases:  # the lead gave no structured cases: the older free-text scenarios

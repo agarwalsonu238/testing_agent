@@ -48,6 +48,7 @@ async def test_setup_check_reports_each_item(
     assert items["app"]["status"] == "fail"  # FakeProbe: app not running
     assert items["app_repo"]["status"] == "warn"
     assert items["agents"]["status"] == "pass"
+    assert items["reviewer"]["status"] == "pass" and "Claude" in items["reviewer"]["detail"]
     assert body["ready"] is False
 
 

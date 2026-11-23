@@ -182,6 +182,7 @@ class RunRecord(BaseModel):
     stage: RunStage | None = None
     activity: str | None = None  # one line on what the run is doing right now
     awaiting_approval: bool = False  # paused until the developer approves the test cases
+    reviewer: str | None = None  # who reviewed the test cases, e.g. "Gemini (gemini-2.5-pro)"
 
 
 class RunCounts(BaseModel):

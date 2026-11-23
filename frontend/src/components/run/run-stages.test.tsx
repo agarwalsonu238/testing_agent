@@ -77,6 +77,16 @@ describe("ReviewStage", () => {
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
   });
 
+  it("says which AI reviewed the cases", () => {
+    const cases = [testCase({ review_status: "rewritten", review_note: "Tightened" })];
+    const { unmount } = render(<ReviewStage run={run({ reviewer: "Gemini (gemini-2.5-pro)", test_cases: cases })} />);
+    expect(screen.getByText("Gemini (gemini-2.5-pro)")).toBeInTheDocument();
+    expect(screen.getByText(/a different AI from the one that wrote the cases/)).toBeInTheDocument();
+    unmount();
+    render(<ReviewStage run={run({ reviewer: "Claude", test_cases: cases })} />);
+    expect(screen.queryByText(/a different AI/)).not.toBeInTheDocument();
+  });
+
   it("lets you untick cases and sends only those you skip when you approve", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);

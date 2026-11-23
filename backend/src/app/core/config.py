@@ -3,7 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Credentials that make Claude Code bill the API instead of the developer's subscription.
@@ -42,6 +42,16 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     anthropic_auth_token: SecretStr | None = None
 
+    # --- Test case reviewer (optional: a different AI checks the cases than the one that wrote
+    # them). "claude" = the same Claude Code login as everything else (default). Any other
+    # provider is billed to its own API key and receives the draft test cases, see
+    # app/integrations/external_reviewer.py for exactly what is sent. ---
+    reviewer_provider: Literal["claude", "gemini", "perplexity", "openai", "custom"] = "claude"
+    reviewer_model: str | None = None  # required for any provider but claude
+    reviewer_api_key: SecretStr | None = None
+    reviewer_base_url: str | None = None  # required for "custom"; optional override otherwise
+    reviewer_timeout_s: int = 120
+
     # --- MCP servers for agents (versions pinned) ---
     playwright_mcp_package: str = "@playwright/mcp@0.0.85"
     chrome_devtools_mcp: bool = False  # separate browser, not behind the risky-endpoint guard
@@ -79,6 +89,32 @@ class Settings(BaseSettings):
     app_repo_git_url: str | None = None  # e.g. https://github.com/org/app-repo.git
     app_repo_git_token: SecretStr | None = None  # PAT with read access, for a private repo
     app_repo_git_ref: str = "main"  # branch/tag Check my change diffs against when cloned here
+
+    @model_validator(mode="after")
+    def _check_reviewer(self) -> "Settings":
+        """A half-configured reviewer fails at startup, not silently in the middle of a run."""
+        if self.reviewer_provider == "claude":
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("REVIEWER_MODEL", self.reviewer_model),
+                (
+                    "REVIEWER_API_KEY",
+                    self.reviewer_api_key and self.reviewer_api_key.get_secret_value(),
+                ),
+                (
+                    "REVIEWER_BASE_URL",
+                    self.reviewer_base_url if self.reviewer_provider == "custom" else "ok",
+                ),
+            )
+            if not value
+        ]
+        if missing:
+            raise ValueError(
+                f"REVIEWER_PROVIDER={self.reviewer_provider} also needs: {', '.join(missing)}"
+            )
+        return self
 
     @property
     def qa_config_path(self) -> Path:

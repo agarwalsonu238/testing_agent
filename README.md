@@ -56,6 +56,24 @@ Every agent run is `claude -p --agents … --agent <name> --mcp-config … --per
 `APP_REPO_PATH` so the app's own `CLAUDE.md`, guidelines and skills load. Never `--bare` (it ignores subscription
 logins). The Claude Code version is pinned (`CLAUDE_CODE_VERSION`); re-check after upgrades.
 
+### A different AI for the review stage (optional)
+
+A run goes plan → review → (your approval) → run → report. Plan, run and report always use Claude, because they
+need your repo and the browser. The **review** stage only reads the draft test cases, so it can be done by another
+AI. In `backend/.env`:
+
+```
+REVIEWER_PROVIDER=gemini            # claude (default) | gemini | perplexity | openai | custom
+REVIEWER_MODEL=<a model name from that provider>
+REVIEWER_API_KEY=<that provider's key>
+# custom only: REVIEWER_BASE_URL=https://your-llm.example.com/v1   (any OpenAI-compatible API)
+```
+
+Restart the backend; the Setup check shows who reviews, and the run's Review tab says "Reviewed by …". It is billed
+to that provider's key, not your Claude plan. It is sent the draft cases (title, steps, expected), never the diff or
+your flow text, but a code-review case can quote a changed line, so those lines reach the provider. If the provider
+fails, Claude reviews instead and the run says so.
+
 Docker (`docker compose up --build`) serves the dashboard only; real runs need `./run-local-dev.sh`.
 
 Per-app details: [frontend/README.md](frontend/README.md), [backend/README.md](backend/README.md).
