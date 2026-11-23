@@ -20,6 +20,7 @@ from app.schemas.runs import (
     RunKind,
     RunParams,
     RunRecord,
+    RunStage,
 )
 from app.services.findings import (
     IgnoreList,
@@ -43,6 +44,8 @@ class RunContext:
         self.ignore = ignore
         self.dir: Path = store.run_dir(record.id).resolve()
         self._seq = len(store.read_events(record.id, 0))
+        self._approved = asyncio.Event()
+        self.skipped_case_ids: set[str] = set()
 
     def event(self, message: str, level: Level = "info", source: str = "run") -> None:
         self._seq += 1
@@ -50,6 +53,28 @@ class RunContext:
             self.record.id,
             RunEvent(seq=self._seq, at=now(), level=level, source=source, message=message),
         )
+
+    def set_stage(self, stage: RunStage, activity: str | None = None) -> None:
+        """Record where the pipeline is, so the run page can show it."""
+        self.record.stage = stage
+        self.record.activity = activity
+        self.record.awaiting_approval = stage == "awaiting_approval"
+        self.save()
+
+    async def wait_for_approval(self) -> set[str]:
+        """Pause until the developer approves; returns the case IDs they chose to skip."""
+        self.set_stage("awaiting_approval", "Waiting for you to approve the test cases")
+        self.event("Paused: waiting for you to approve the test cases", source="qa-lead")
+        await self._approved.wait()
+        return self.skipped_case_ids
+
+    @property
+    def waiting_for_approval(self) -> bool:
+        return self.record.awaiting_approval and not self._approved.is_set()
+
+    def approve(self, skip: set[str]) -> None:
+        self.skipped_case_ids = skip
+        self._approved.set()
 
     def add_findings(self, findings: list[Finding]) -> None:
         start = len(self.record.findings)
@@ -90,6 +115,10 @@ class RunContext:
                 record.verdict = verdict_from_findings(record.findings)
         record.status = "finished"
         record.finished_at = now()
+        record.awaiting_approval = False
+        record.activity = None
+        if record.stage is not None:
+            record.stage = "done"
         self.save()
         self.event(f"Finished: {record.verdict}")
 
@@ -103,6 +132,7 @@ class RunManager:
         self.ignore = ignore
         self._task: asyncio.Task[None] | None = None
         self._run_id: str | None = None
+        self._ctx: RunContext | None = None
 
     @property
     def active_run_id(self) -> str | None:
@@ -121,6 +151,7 @@ class RunManager:
         ctx = RunContext(self.store, record, self.ignore)
         ctx.event(f"Started {title}")
         self._run_id = record.id
+        self._ctx = ctx
         self._task = asyncio.create_task(self._execute(ctx, job), name=f"run-{record.id}")
         return record
 
@@ -154,6 +185,17 @@ class RunManager:
             await asyncio.wait_for(asyncio.shield(self._task), 15)
         except (TimeoutError, asyncio.CancelledError):
             logger.warning("Run %s is slow to stop after cancel", run_id)
+
+    async def approve(self, run_id: str, skip: list[str]) -> None:
+        """Resume a run that is waiting for the developer to approve its test cases.
+
+        Raises ConflictError when the run isn't waiting, NotFoundError for an unknown run.
+        """
+        await self.get(run_id)  # 404 for an unknown run
+        ctx = self._ctx
+        if ctx is None or ctx.record.id != run_id or not ctx.waiting_for_approval:
+            raise ConflictError("This run isn't waiting for approval")
+        ctx.approve({c.strip().upper() for c in skip})
 
     async def wait(self) -> None:
         """Wait for the active run (tests and shutdown)."""

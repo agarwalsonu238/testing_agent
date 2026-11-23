@@ -104,4 +104,8 @@ class RunStore:
                 record.verdict = "BLOCKED"
                 record.blocked_reason = "Interrupted: the QA agent backend restarted during the run"
                 record.finished_at = now()
+                record.awaiting_approval = False
+                record.activity = None
+                if record.stage is not None:
+                    record.stage = "done"
                 self.save(record)

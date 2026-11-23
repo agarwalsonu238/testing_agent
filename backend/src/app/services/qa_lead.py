@@ -36,13 +36,15 @@ from app.services.agents import (
     AgentCall,
     AgentDeps,
     LeadPlan,
+    PendingReport,
     PlannedCase,
     ReviewedCase,
     ReviewResult,
     copy_designs,
+    execute_agent,
     get_agent,
     invoke_agent,
-    run_review_agent,
+    report_agent,
 )
 from app.services.api_reference import agent_notes, build_references
 from app.services.run_manager import RunContext
@@ -139,13 +141,13 @@ async def run_check_change(
         ctx.event(f"No changes since {base}; testing the described flow only", level="warn")
 
     review_agents = summary.agents  # Code reviewer / Design reviewer; functionality runs below
+    ctx.set_stage("planning", "The QA Lead is writing the test cases")
     plan = await _lead_plan(
         ctx, deps, mode=mode, changes=changes, flow_hint=flow, required_agents=review_agents
     )
+    ctx.set_stage("reviewing", "The test case reviewer is checking the cases")
     reviewed = await _review_cases(ctx, deps, mode, plan.test_cases)
     store_test_cases(ctx, plan, reviewed, FUNCTIONALITY_TESTER, [flow] if flow else [])
-    func_cases = _cases_for(ctx, FUNCTIONALITY_TESTER)
-    scenarios = [case_text(c) for c in func_cases]
 
     lines = [plan.summary.strip()] if plan.summary.strip() else []
     if ctx.record.test_cases:
@@ -156,57 +158,95 @@ async def run_check_change(
     ctx.record.plan_summary = "\n".join(lines)
     ctx.save()
 
-    # Functionality is always checked first: the scenarios are planned before anything runs,
-    # and every one of them is tested before the (slower, less important) code/design review.
-    if scenarios:
-        ctx.event(f"{len(scenarios)} test case scenario(s) planned", source=QA_LEAD)
-        for i, scenario in enumerate(scenarios, 1):
-            ctx.event(
-                f"Testing scenario {i}/{len(scenarios)}: {_first_line(scenario)}",
-                source=FUNCTIONALITY_TESTER,
-            )
-            await run_review_agent(
-                ctx,
-                deps,
-                AgentCall(
-                    agent=get_agent(s, FUNCTIONALITY_TESTER),
-                    task=f"Test case {i} of {len(scenarios)}:\n{scenario}",
-                    context=cases_context([func_cases[i - 1]]),
-                    mode=mode,
-                    # Distinct evidence folder per scenario: without it, scenario 2's
-                    # screenshots and recorder log would overwrite scenario 1's.
-                    work_dir_name=f"{FUNCTIONALITY_TESTER}-{i}",
-                ),
-            )
-    elif flow:
-        ctx.event("Functionality tester skipped: the QA Lead gave no plan", level="warn")
+    await _approval_gate(ctx)
 
+    # Functionality is always checked first: every case is planned and reviewed before anything
+    # runs, and every functionality case is tested before the (slower, less important) code,
+    # design and API review.
+    s = deps.settings
+    calls: list[AgentCall] = []
+    func_cases = _cases_for(ctx, FUNCTIONALITY_TESTER)
+    for i, case in enumerate(func_cases, 1):
+        calls.append(
+            AgentCall(
+                agent=get_agent(s, FUNCTIONALITY_TESTER),
+                task=f"Test case {i} of {len(func_cases)}:\n{case_text(case)}",
+                context=cases_context([case]),
+                mode=mode,
+                case_ids=[case.id],
+                # Distinct evidence folder per case: without it, case 2's screenshots and
+                # recorder log would overwrite case 1's.
+                work_dir_name=f"{FUNCTIONALITY_TESTER}-{i}",
+            )
+        )
     for name in review_agents:
+        cases = _cases_for(ctx, name)
+        if not cases:
+            ctx.event(f"{name} skipped: no approved test case for it", level="warn", source=name)
+            continue
         if name == CODE_REVIEWER:
-            await run_review_agent(
-                ctx,
-                deps,
+            calls.append(
                 AgentCall(
                     agent=get_agent(s, name),
                     task="Review this change against the repo's guidelines and skills.",
                     mode=mode,
-                    context=cases_context(_cases_for(ctx, name)),
-                ),
+                    context=cases_context(cases),
+                    case_ids=[c.id for c in cases],
+                )
             )
         elif name == DESIGN_REVIEWER:
-            await _design_reviews(ctx, deps, mode, plan.design_routes)
+            calls += _design_calls(ctx, deps, mode, plan.design_routes, cases)
         elif name == API_CHECKER:
-            await run_review_agent(
-                ctx,
-                deps,
+            calls.append(
                 AgentCall(
                     agent=get_agent(s, name),
                     task="Compare the frontend's API calls with the backend's routes for this "
                     "change.",
                     mode=mode,
-                    context=cases_context(_cases_for(ctx, name)),
-                ),
+                    context=cases_context(cases),
+                    case_ids=[c.id for c in cases],
+                )
             )
+    if not calls:
+        raise BlockedError("No approved test case is left to run")
+    await _execute_then_report(ctx, deps, calls)
+
+
+async def _approval_gate(ctx: RunContext) -> None:
+    """When the developer asked for it, pause until they approve the reviewed test cases.
+
+    Cases they skip are never run. Cancel still works while the run waits.
+    """
+    runnable = [c for c in ctx.record.test_cases if c.status == "planned"]
+    if not ctx.record.params.approve_plan or not runnable:
+        return
+    skipped = await ctx.wait_for_approval()
+    skipped_now = [c for c in runnable if c.id.upper() in skipped]
+    for case in skipped_now:
+        case.status, case.note = "skipped", "You chose not to run this case"
+    ctx.save()
+    ctx.event(
+        f"Approved: {len(runnable) - len(skipped_now)} case(s) will run, "
+        f"{len(skipped_now)} skipped by you",
+        source=QA_LEAD,
+    )
+
+
+def _activity(call: AgentCall, index: int, total: int) -> str:
+    return f"{call.agent.name} · {index} of {total}: {_first_line(call.task)[:90]}"
+
+
+async def _execute_then_report(ctx: RunContext, deps: AgentDeps, calls: list[AgentCall]) -> None:
+    """Stage 3 runs every executor, one at a time; only then does stage 4 write each report."""
+    pending: list[PendingReport] = []
+    for i, call in enumerate(calls, 1):
+        ctx.set_stage("running", _activity(call, i, len(calls)))
+        outcome = await execute_agent(ctx, deps, call)
+        if isinstance(outcome, PendingReport):
+            pending.append(outcome)
+    for i, item in enumerate(pending, 1):
+        ctx.set_stage("reporting", f"Writing report {i} of {len(pending)}: {item.call.agent.name}")
+        await report_agent(ctx, deps, item)
 
 
 async def _review_cases(
@@ -293,6 +333,7 @@ def store_test_cases(
                 status="skipped" if rejected else "planned",
                 note=rc.review_note if rejected else None,
                 review_note=None if rejected else rc.review_note,
+                review_status=rc.review_status,
             )
         )
     if not cases:  # the lead gave no structured cases: the older free-text scenarios
@@ -420,15 +461,15 @@ async def _lead_plan(
     return LeadPlan()
 
 
-async def _design_reviews(
-    ctx: RunContext, deps: AgentDeps, mode: RunMode, routes: list[str]
-) -> None:
+def _design_calls(
+    ctx: RunContext, deps: AgentDeps, mode: RunMode, routes: list[str], cases: list[TestCase]
+) -> list[AgentCall]:
     s = deps.settings
     clean = [r for r in dict.fromkeys(routes) if r.startswith("/")][:MAX_DESIGN_ROUTES]
     if not clean:
         ctx.event("Design reviewer skipped: the QA Lead found no changed route", level="warn")
-        return
-    cases = cases_context(_cases_for(ctx, DESIGN_REVIEWER))
+        return []
+    calls: list[AgentCall] = []
     for route in clean:
         designs = copy_designs(s, route, ctx.dir)
         if not designs and not s.figma_mcp_url:
@@ -437,8 +478,10 @@ async def _design_reviews(
             )
             continue
         call = design_call(deps, route, mode, designs)
-        call.context += cases
-        await run_review_agent(ctx, deps, call)
+        call.context += cases_context(cases)
+        call.case_ids = [c.id for c in cases]
+        calls.append(call)
+    return calls
 
 
 def design_call(
@@ -497,12 +540,20 @@ async def run_single_agent(
     # Always first: turn the developer's prompt (and any diff) into a full list of test cases,
     # review them, store the result, and only then let the agent execute them.
     ctx.event(f"Planning test cases for {agent} before testing", source=QA_LEAD)
+    ctx.set_stage("planning", "The QA Lead is writing the test cases")
     plan = await _lead_plan(
         ctx, deps, mode=mode, changes=changes, flow_hint=task, target_agent=agent
     )
+    ctx.set_stage("reviewing", "The test case reviewer is checking the cases")
     reviewed = await _review_cases(ctx, deps, mode, plan.test_cases)
     store_test_cases(ctx, plan, reviewed, agent, [task])
-    cases = cases_context(_cases_for(ctx, agent))
+    ctx.record.plan_summary = plan.summary.strip() or None
+    ctx.save()
+    await _approval_gate(ctx)
+    approved = _cases_for(ctx, agent)
+    if not approved:
+        raise BlockedError("No approved test case is left to run")
+    cases = cases_context(approved)
     if agent == DESIGN_REVIEWER:
         if not route:
             raise PreconditionError("The Design reviewer needs a route, e.g. /pricing")
@@ -535,4 +586,5 @@ async def run_single_agent(
         call = AgentCall(
             agent=get_agent(s, agent), task=task, mode=mode, route=route, context=cases
         )
-    await run_review_agent(ctx, deps, call)
+    call.case_ids = [c.id for c in approved]
+    await _execute_then_report(ctx, deps, [call])

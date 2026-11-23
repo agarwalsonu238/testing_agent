@@ -158,6 +158,29 @@ def test_recorder_log_turns_errors_into_failed_checks_and_skips_guard_blocks() -
     )
 
 
+def test_cancelled_requests_are_not_failed_checks() -> None:
+    lines = [
+        json.dumps(
+            {
+                "type": "requestfailed",
+                "method": "GET",
+                "url": "http://x/search?_rsc=1ld0r",
+                "failure": "net::ERR_ABORTED",
+            }
+        ),
+        json.dumps(
+            {
+                "type": "requestfailed",
+                "method": "GET",
+                "url": "http://x/api/p",
+                "failure": "net::ERR_CONNECTION_REFUSED",
+            }
+        ),
+    ]
+    checks, _ = checks_from_recording(lines, [])
+    assert [c.detail for c in checks] == ["GET http://x/api/p failed: net::ERR_CONNECTION_REFUSED"]
+
+
 def test_extract_playwright_code_from_tool_results() -> None:
     action = "await page.getByRole('button', { name: 'Yearly' }).click();"
     text = f"### Ran Playwright code\n```js\n{action}\n```\n### Page"

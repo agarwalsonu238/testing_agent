@@ -21,6 +21,8 @@ class SetupCheck(BaseModel):
 class AgentInfo(BaseModel):
     name: str
     description: str
+    # False for roles that only run inside another flow (QA Lead, reviewer, reporter, Test writer).
+    standalone: bool = True
 
 
 class QaConfigSummary(BaseModel):

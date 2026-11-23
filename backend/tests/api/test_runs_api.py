@@ -134,14 +134,15 @@ async def test_check_change_tests_a_described_flow_even_with_no_diff(
 
     detail = (await client.get(f"/api/v1/runs/{run_id}")).json()
     # No structured test_cases from the Lead (only free-text scenarios), so the reviewer is
-    # skipped; each functionality-tester (executor) call is followed by its own reporter call.
+    # skipped; every executor runs first (stage 3), and only then does each reporter (stage 4).
     assert fake.agents_called == [
         "qa-lead",
         "functionality-tester",
-        "qa-reporter",
         "functionality-tester",
         "qa-reporter",
+        "qa-reporter",
     ]
+    assert detail["stage"] == "done"
     assert "Test cases (2), planned before testing" in detail["plan_summary"]
     assert [c["id"] for c in detail["test_cases"]] == ["TC-1", "TC-2"]
     assert len(detail["agents"]) == 2

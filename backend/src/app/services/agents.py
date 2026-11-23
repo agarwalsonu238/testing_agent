@@ -38,6 +38,7 @@ from app.schemas.runs import (
     RunMode,
     Severity,
     Step,
+    TestCase,
     Verdict,
 )
 from app.services.findings import verdict_from_findings
@@ -53,10 +54,15 @@ QA_LEAD = "qa-lead"
 TEST_WRITER = "test-writer"
 TEST_CASE_REVIEWER = "test-case-reviewer"
 QA_REPORTER = "qa-reporter"
+# Roles that only run inside another flow, so they get no page of their own.
+PIPELINE_ONLY = frozenset({QA_LEAD, TEST_WRITER, TEST_CASE_REVIEWER, QA_REPORTER})
 
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit", "Bash")
 ALWAYS_DENIED = ("mcp__playwright__browser_run_code_unsafe",)
 _GUARD_BLOCK = "ERR_BLOCKED_BY_CLIENT"
+# The browser cancelled the request itself (e.g. a Next.js page-prefetch dropped when the tester
+# navigates away). The server never answered wrongly, so it is not a failed check.
+_BROWSER_CANCELLED = "ERR_ABORTED"
 _CODE_BLOCK = re.compile(
     r"### Ran Playwright code\s*```(?:js|ts|javascript|typescript)?\s*\n(.*?)```", re.DOTALL
 )
@@ -543,7 +549,9 @@ def checks_from_recording(
             checks.append(
                 Check(source="pageerror", passed=False, detail=f"Page error: {text[:300]}")
             )
-        elif kind == "requestfailed" and _GUARD_BLOCK not in str(entry.get("failure")):
+        elif kind == "requestfailed" and not any(
+            ignored in str(entry.get("failure")) for ignored in (_GUARD_BLOCK, _BROWSER_CANCELLED)
+        ):
             checks.append(
                 Check(
                     source="network",
@@ -616,6 +624,9 @@ class AgentCall:
     # run folder itself, since diff.patch lives there and it's the only role allowed to see it.
     add_dirs: list[Path] = field(default_factory=list)
     raw_log_name: str = "claude-stream.jsonl"
+    # The test case IDs this call executes. Results are written back to these cases only; with
+    # none given, to every still-planned case of the agent.
+    case_ids: list[str] = field(default_factory=list)
 
 
 _WRITING_RULES = [
@@ -794,15 +805,47 @@ def copy_designs(settings: Settings, route: str, run_dir: Path) -> dict[str, Pat
     return copied
 
 
-def _apply_case_results(ctx: RunContext, agent: str, results: list[ReportedCase]) -> None:
-    """Record the agent's pass/fail per planned test case; cases it never mentioned are skipped."""
+def _calls_cases(ctx: RunContext, agent: str, case_ids: list[str]) -> list[TestCase]:
+    """The cases a call is responsible for, never a case the developer or the reviewer skipped."""
+    wanted = {c.upper() for c in case_ids}
+    return [
+        c
+        for c in ctx.record.test_cases
+        if c.agent == agent
+        and (c.id.upper() in wanted if wanted else True)
+        and c.review_status != "rejected"
+        and c.id.upper() not in ctx.skipped_case_ids
+    ]
+
+
+def _apply_observations(
+    ctx: RunContext, agent: str, case_ids: list[str], observed: list[CaseObservation]
+) -> None:
+    """Show what the executor saw per case straight away; the reporter settles it afterwards."""
+    by_id = {o.id.strip().upper(): o for o in observed}
+    for case in _calls_cases(ctx, agent, case_ids):
+        seen = by_id.get(case.id.upper())
+        if seen is not None:
+            case.status, case.note = seen.status, seen.observed[:1000] or None
+    ctx.save()
+
+
+def _apply_case_results(
+    ctx: RunContext, agent: str, case_ids: list[str], results: list[ReportedCase]
+) -> None:
+    """Record the agent's pass/fail per test case in this call; a case it never mentioned is
+    skipped."""
     by_id = {r.id.strip().upper(): r for r in results}
-    for case in ctx.record.test_cases:
-        if case.agent != agent or case.status != "planned":
-            continue
+    for case in _calls_cases(ctx, agent, case_ids):
         reported = by_id.get(case.id.upper())
         case.status = reported.status if reported else "skipped"
         case.note = reported.note if reported else "The agent did not report this case"
+    ctx.save()
+
+
+def _mark_blocked(ctx: RunContext, agent: str, case_ids: list[str], reason: str) -> None:
+    for case in _calls_cases(ctx, agent, case_ids):
+        case.status, case.note = "blocked", reason[:1000]
     ctx.save()
 
 
@@ -860,13 +903,26 @@ async def _run_reporter(
         return None
 
 
-async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) -> AgentResult:
-    """Run a reviewing/testing agent, then the Reporter, store findings and evidence, and return
-    the result.
+@dataclass
+class PendingReport:
+    """An executor that has run and is waiting for its Reporter (the next pipeline stage)."""
 
-    The executor and the Reporter never see the diff or the flow text — only the test case(s)
-    assigned to this call. The run continues when either is BLOCKED; BlockedError is only raised
-    for problems that stop every agent (see `invoke_agent`).
+    call: AgentCall
+    run: AgentRun
+    record: ExecutionRecord
+    task_label: str
+    work_dir: str
+    started: float
+
+
+async def execute_agent(
+    ctx: RunContext, deps: AgentDeps, call: AgentCall
+) -> PendingReport | AgentResult:
+    """Stage 3: run one executor on its assigned case(s) and note what it observed.
+
+    Returns the `AgentResult` straight away when the executor was blocked (nothing to report on),
+    otherwise a `PendingReport` for `report_agent`. The executor never sees the diff or the flow
+    text. BlockedError is only raised for problems that stop every agent (see `invoke_agent`).
     """
     name = call.agent.name
     loop = asyncio.get_running_loop()
@@ -876,7 +932,8 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
     work_dir = run.work.relative_to(ctx.dir).as_posix()
 
     def blocked(reason: str) -> AgentResult:
-        return AgentResult(
+        _mark_blocked(ctx, name, call.case_ids, reason)
+        result = AgentResult(
             agent=name,
             task=task_label,
             verdict="BLOCKED",
@@ -885,6 +942,8 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
             duration_s=round(loop.time() - started, 1),
             work_dir=work_dir,
         )
+        ctx.add_agent_result(result)
+        return result
 
     for log_name, label in (
         ("claude-stream.jsonl", "Claude Code stream"),
@@ -895,26 +954,47 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
             ctx.add_artifact(f"{run.work.name}: {label}", path, "log")
 
     if not run.result.ok:
-        result = blocked(run.result.error or "Claude Code reported an error")
-        ctx.add_agent_result(result)
-        return result
+        return blocked(run.result.error or "Claude Code reported an error")
     try:
         record = ExecutionRecord.model_validate(run.result.structured or {})
         if run.result.structured is None:
             raise ValueError("no JSON object in the reply")
     except (ValidationError, ValueError) as exc:
-        result = blocked(f"The agent's reply didn't match the execution format ({str(exc)[:120]})")
+        return blocked(f"The agent's reply didn't match the execution format ({str(exc)[:120]})")
+    _apply_observations(ctx, name, call.case_ids, record.case_observations)
+    return PendingReport(call, run, record, task_label, work_dir, started)
+
+
+async def report_agent(ctx: RunContext, deps: AgentDeps, pending: PendingReport) -> AgentResult:
+    """Stage 4: the Reporter turns one executor's observations into findings and a summary.
+
+    It sees only the test case(s) and what the executor observed — never the diff or the flow.
+    """
+    call, run, record = pending.call, pending.run, pending.record
+    name = call.agent.name
+    loop = asyncio.get_running_loop()
+    task_label = pending.task_label
+
+    def blocked(reason: str) -> AgentResult:
+        _mark_blocked(ctx, name, call.case_ids, reason)
+        result = AgentResult(
+            agent=name,
+            task=task_label,
+            verdict="BLOCKED",
+            blocked_reason=reason,
+            checks=run.checks,
+            duration_s=round(loop.time() - pending.started, 1),
+            work_dir=pending.work_dir,
+        )
         ctx.add_agent_result(result)
         return result
 
     checks_for_reporter = run.checks if name == FUNCTIONALITY_TESTER else None
     report = await _run_reporter(ctx, deps, call, record, checks_for_reporter, run.work)
     if report is None:
-        result = blocked("The reporter didn't produce a usable report")
-        ctx.add_agent_result(result)
-        return result
+        return blocked("The reporter didn't produce a usable report")
 
-    _apply_case_results(ctx, name, report.case_results)
+    _apply_case_results(ctx, name, call.case_ids, report.case_results)
     findings = report_to_findings(report, name, ctx.dir, call.designs)
     for check in run.checks:
         if not check.passed and call.agent.name == FUNCTIONALITY_TESTER:
@@ -961,8 +1041,8 @@ async def run_review_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) ->
         blocked_reason=reason,
         steps=steps,
         checks=run.checks,
-        duration_s=round(loop.time() - started, 1),
-        work_dir=work_dir,
+        duration_s=round(loop.time() - pending.started, 1),
+        work_dir=pending.work_dir,
     )
     ctx.add_agent_result(result)
     ctx.event(f"{name}: {verdict} ({len(findings)} finding(s))", source=name)

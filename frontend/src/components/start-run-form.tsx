@@ -36,6 +36,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
   const [baseRef, setBaseRef] = useState("");
   const [appUrl, setAppUrl] = useState("");
   const [repoPath, setRepoPath] = useState("");
+  const [approvePlan, setApprovePlan] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,6 +61,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
           mode,
           base_ref: baseRef.trim() || undefined,
           flow: text.trim() || undefined,
+          approve_plan: approvePlan,
           ...target,
         });
       } else {
@@ -68,6 +70,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
           task: text.trim(),
           route: route.trim() || undefined,
           mode,
+          approve_plan: approvePlan,
           ...target,
         });
       }
@@ -202,6 +205,25 @@ export function StartRunForm({ variant }: { variant: Variant }) {
       {variant.kind !== "agent" || !["code-reviewer", "api-checker"].includes(variant.agent) ? (
         <ModePicker value={mode} onChange={setMode} disabled={busy} />
       ) : null}
+
+      {variant.kind !== "quick-scan" && (
+        <label className="flex max-w-2xl items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={approvePlan}
+            disabled={busy}
+            onChange={(e) => setApprovePlan(e.target.checked)}
+          />
+          <span>
+            Let me approve the test cases before they run
+            <span className="block text-xs text-muted-foreground">
+              The run writes and reviews the cases, then waits for your go-ahead. You can untick any case. Nothing is tested until
+              you approve.
+            </span>
+          </span>
+        </label>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" size="lg" disabled={busy}>

@@ -8,8 +8,16 @@ import { useState } from "react";
 import { Tag, VerdictBadge } from "@/components/badges";
 import { FindingCard } from "@/components/finding-card";
 import { ApiReferenceView } from "@/components/run/api-reference-view";
-import { AgentResultCard } from "@/components/run/agent-result-card";
 import { RunLog } from "@/components/run/run-log";
+import {
+  AgentSteps,
+  defaultStage,
+  PlanStage,
+  ReviewStage,
+  StagePanel,
+  StageTabs,
+  type StageKey,
+} from "@/components/run/run-stages";
 import { Button } from "@/components/ui/button";
 import { useApiData } from "@/hooks/use-api-data";
 import {
@@ -155,6 +163,9 @@ export function RunReport() {
   const run = useApiData(`run:${id}`, (signal) => getRun(id, { signal }), interval);
   const events = useApiData(`events:${id}`, (signal) => getRunEvents(id, 0, { signal }), interval);
 
+  // null = follow the pipeline (the stage in progress, then the report); a click pins a stage.
+  const [pinned, setPinned] = useState<StageKey | null>(null);
+
   const data = run.data;
   const isFinished = data?.id === id && data.status === "finished";
   if (isFinished && finished !== id) setFinished(id);
@@ -173,10 +184,89 @@ export function RunReport() {
   if (!data) return <p className="text-muted-foreground">Loading run…</p>;
 
   const running = data.status === "running";
+  const stage = pinned ?? defaultStage(data);
+  const setStage = (key: StageKey) => setPinned(key);
+  const hasPipeline =
+    data.test_cases.length > 0 ||
+    Boolean(data.plan_summary) ||
+    (running && (data.kind === "check-change" || data.kind === "agent"));
   const findings = [...data.findings].sort((a, b) => Number(a.status !== "open") - Number(b.status !== "open"));
 
+  const runContent = (
+    <>
+      <AgentSteps run={data} />
+      {data.api_references.length > 0 && (
+        <section aria-labelledby="api-heading" className="grid gap-3">
+          <h2 id="api-heading" className="text-lg font-semibold">
+            API in plain words
+          </h2>
+          {data.api_references.map((ref) => (
+            <ApiReferenceView key={ref.url} runId={data.id} reference={ref} />
+          ))}
+        </section>
+      )}
+
+      <Artifacts run={data} />
+      <RunLog events={events.data?.events ?? []} live={running} />
+    </>
+  );
+
+  const reportContent = (
+    <>
+      <section aria-labelledby="findings-heading" className="grid gap-3">
+        <h2 id="findings-heading" className="text-lg font-semibold">
+          Findings
+        </h2>
+        {findings.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {running
+              ? "Reports are written after every agent has run (stage 4). Nothing to show yet."
+              : "No findings."}
+          </p>
+        )}
+        {findings.map((finding) => (
+          <FindingCard key={finding.id} runId={data.id} finding={finding} locked={running} onDecided={() => run.reload()} />
+        ))}
+      </section>
+
+      {data.saved_test && (
+        <section aria-labelledby="saved-heading" className="grid gap-1 rounded-xl border p-4 text-sm">
+          <h2 id="saved-heading" className="font-semibold">
+            Saved test {data.saved_test.test_id}
+          </h2>
+          <p>
+            <code>{data.saved_test.file}</code> on branch <code>{data.saved_test.branch}</code>
+            {data.saved_test.commit && ` (commit ${data.saved_test.commit.slice(0, 8)})`}
+          </p>
+          {data.saved_test.pr_url ? (
+            <a href={data.saved_test.pr_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-4">
+              Open the PR <ExternalLink className="size-3" aria-hidden />
+            </a>
+          ) : (
+            !running && <p className="text-muted-foreground">Not pushed. See the progress log for why.</p>
+          )}
+        </section>
+      )}
+
+      {!running && (
+        <section aria-labelledby="summary-heading" className="grid gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <h2 id="summary-heading" className="text-lg font-semibold">
+              Summary for the PR description
+            </h2>
+            <CopyButton text={data.report_summary} />
+          </div>
+          <pre className="overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs whitespace-pre-wrap">
+            {data.report_summary}
+          </pre>
+        </section>
+      )}
+
+    </>
+  );
+
   return (
-    <div className="grid gap-8">
+    <div className="grid min-w-0 grid-cols-1 gap-8">
       <header className="grid gap-2">
         <p className="text-sm text-muted-foreground">
           <Link href="/runs" className="underline-offset-4 hover:underline">
@@ -216,6 +306,21 @@ export function RunReport() {
             )}
           </div>
         )}
+        {running && data.activity && !data.awaiting_approval && (
+          <p role="status" className="text-sm text-muted-foreground">
+            Now: {data.activity}
+          </p>
+        )}
+        {data.awaiting_approval && (
+          <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-sky-600/30 bg-sky-500/10 p-3 text-sm">
+            <span>
+              <strong>Paused for you:</strong> approve the test cases before anything is tested.
+            </span>
+            <Button size="sm" variant="outline" onClick={() => setPinned("review")}>
+              Review and approve
+            </Button>
+          </div>
+        )}
         {data.blocked_reason && (
           <p role="status" className="rounded-lg border border-amber-600/30 bg-amber-500/10 p-3 text-sm">
             <strong>BLOCKED:</strong> {data.blocked_reason}
@@ -223,112 +328,22 @@ export function RunReport() {
         )}
       </header>
 
-      {data.plan_summary && (
-        <section aria-labelledby="plan-heading" className="grid gap-1">
-          <h2 id="plan-heading" className="text-lg font-semibold">
-            QA Lead plan
-          </h2>
-          <p className="text-sm whitespace-pre-wrap">{data.plan_summary}</p>
-        </section>
+      {hasPipeline ? (
+        <>
+          <StageTabs run={data} selected={stage} onSelect={setStage} />
+          <StagePanel stage={stage}>
+            {stage === "plan" && <PlanStage run={data} />}
+            {stage === "review" && <ReviewStage run={data} onApproved={() => run.reload()} />}
+            {stage === "run" && runContent}
+            {stage === "report" && reportContent}
+          </StagePanel>
+        </>
+      ) : (
+        <>
+          {runContent}
+          {reportContent}
+        </>
       )}
-
-      {data.test_cases.length > 0 && (
-        <section aria-labelledby="cases-heading" className="grid gap-2">
-          <h2 id="cases-heading" className="text-lg font-semibold">
-            Test cases (planned first, {data.test_cases.length})
-          </h2>
-          <ul className="grid gap-2">
-            {data.test_cases.map((c) => (
-              <li key={c.id} className="rounded-lg border p-3 text-sm">
-                <p className="font-medium">
-                  {c.id} · {c.title} <Tag>{c.status}</Tag>
-                </p>
-                <p className="text-muted-foreground">{c.agent}</p>
-                {c.steps.length > 0 && (
-                  <ol className="ml-5 list-decimal">
-                    {c.steps.map((st, i) => (
-                      <li key={i}>{st}</li>
-                    ))}
-                  </ol>
-                )}
-                {c.expected && <p>Expected: {c.expected}</p>}
-                {c.note && <p className="text-muted-foreground">{c.note}</p>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {data.saved_test && (
-        <section aria-labelledby="saved-heading" className="grid gap-1 rounded-xl border p-4 text-sm">
-          <h2 id="saved-heading" className="font-semibold">
-            Saved test {data.saved_test.test_id}
-          </h2>
-          <p>
-            <code>{data.saved_test.file}</code> on branch <code>{data.saved_test.branch}</code>
-            {data.saved_test.commit && ` (commit ${data.saved_test.commit.slice(0, 8)})`}
-          </p>
-          {data.saved_test.pr_url ? (
-            <a href={data.saved_test.pr_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline underline-offset-4">
-              Open the PR <ExternalLink className="size-3" aria-hidden />
-            </a>
-          ) : (
-            !running && <p className="text-muted-foreground">Not pushed. See the progress log for why.</p>
-          )}
-        </section>
-      )}
-
-      {data.api_references.length > 0 && (
-        <section aria-labelledby="api-heading" className="grid gap-3">
-          <h2 id="api-heading" className="text-lg font-semibold">
-            API in plain words
-          </h2>
-          {data.api_references.map((ref) => (
-            <ApiReferenceView key={ref.url} runId={data.id} reference={ref} />
-          ))}
-        </section>
-      )}
-
-      {data.agents.length > 0 && (
-        <section aria-labelledby="agents-heading" className="grid gap-3">
-          <h2 id="agents-heading" className="text-lg font-semibold">
-            Agents
-          </h2>
-          {data.agents.map((result, i) => (
-            <AgentResultCard key={`${result.agent}-${i}`} runId={data.id} result={result} />
-          ))}
-        </section>
-      )}
-
-      <section aria-labelledby="findings-heading" className="grid gap-3">
-        <h2 id="findings-heading" className="text-lg font-semibold">
-          Findings
-        </h2>
-        {findings.length === 0 && (
-          <p className="text-sm text-muted-foreground">{running ? "None yet." : "No findings."}</p>
-        )}
-        {findings.map((finding) => (
-          <FindingCard key={finding.id} runId={data.id} finding={finding} locked={running} onDecided={() => run.reload()} />
-        ))}
-      </section>
-
-      <Artifacts run={data} />
-
-      {!running && (
-        <section aria-labelledby="summary-heading" className="grid gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h2 id="summary-heading" className="text-lg font-semibold">
-              Summary for the PR description
-            </h2>
-            <CopyButton text={data.report_summary} />
-          </div>
-          <pre className="overflow-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs whitespace-pre-wrap">
-            {data.report_summary}
-          </pre>
-        </section>
-      )}
-
-      <RunLog events={events.data?.events ?? []} live={running} />
     </div>
   );
 }

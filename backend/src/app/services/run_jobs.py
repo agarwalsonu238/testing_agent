@@ -89,7 +89,11 @@ async def start_check_change(
     _ensure_subscription(deps)
     deps = retarget(deps, req)
     params = RunParams(
-        mode=req.mode, base_ref=req.base_ref, flow=req.flow, **_target_params(deps, req)
+        mode=req.mode,
+        base_ref=req.base_ref,
+        flow=req.flow,
+        approve_plan=req.approve_plan,
+        **_target_params(deps, req),
     )
 
     async def job(ctx: RunContext) -> None:
@@ -110,6 +114,7 @@ async def start_agent_run(manager: RunManager, deps: AgentDeps, req: AgentRunReq
         agent=req.agent,
         task=req.task,
         route=req.route,
+        approve_plan=req.approve_plan,
         **_target_params(deps, req),
     )
     title = f"{req.agent}" + (f" · {req.route}" if req.route else "")

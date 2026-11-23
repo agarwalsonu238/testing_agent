@@ -150,6 +150,7 @@ export type RunParams = {
   base_ref: string | null;
   source_run_id: string | null;
   test_id: string | null;
+  approve_plan: boolean;
 };
 
 export type RunCounts = { open: number; total: number };
@@ -174,9 +175,21 @@ export type TestCase = {
   expected: string;
   status: "planned" | "pass" | "fail" | "blocked" | "skipped";
   note: string | null;
+  /** What the test-case reviewer changed (rewritten) — null when approved unchanged or rejected. */
+  review_note: string | null;
+  /** The reviewer's decision; null when no review ran (older runs). */
+  review_status: "approved" | "rewritten" | "rejected" | null;
 };
 
+/** Where a Check my change / agent run is in its pipeline; null for runs that have none. */
+export type RunStageName = "planning" | "reviewing" | "awaiting_approval" | "running" | "reporting" | "done";
+
 export type RunDetail = Omit<RunSummary, "mode"> & {
+  stage: RunStageName | null;
+  /** One line on what the run is doing right now. */
+  activity: string | null;
+  /** Paused until the developer approves the reviewed test cases. */
+  awaiting_approval: boolean;
   blocked_reason: string | null;
   params: RunParams;
   plan_summary: string | null;
@@ -209,7 +222,8 @@ export type SetupItem = {
 
 export type SetupCheck = { ready: boolean; items: SetupItem[] };
 
-export type AgentInfo = { name: string; description: string };
+/** `standalone` is false for roles that only run inside another flow (QA Lead, reviewer, reporter…). */
+export type AgentInfo = { name: string; description: string; standalone: boolean };
 
 export type QaConfigSummary = {
   app_url: string;
@@ -247,6 +261,9 @@ export const getRunEvents = (id: string, after: number, init?: RequestInit) =>
     init,
   );
 export const cancelRun = (id: string) => post<RunDetail>(`/runs/${encodeURIComponent(id)}/cancel`);
+/** Let a run that is waiting go ahead; `skip` lists test case IDs the developer chose not to run. */
+export const approveRun = (id: string, skip: string[]) =>
+  post<RunDetail>(`/runs/${encodeURIComponent(id)}/approve`, { skip });
 
 /** Which project to test. Omitted fields fall back to the server's APP_URL / APP_REPO_PATH. */
 export type RunTarget = { app_url?: string; app_repo_path?: string };
@@ -254,10 +271,10 @@ export type RunTarget = { app_url?: string; app_repo_path?: string };
 export const startQuickScan = (mode: RunMode, target: RunTarget = {}) =>
   post<RunDetail>("/runs/quick-scan", { mode, ...target });
 export const startCheckChange = (
-  body: { mode: RunMode; base_ref?: string; flow?: string } & RunTarget,
+  body: { mode: RunMode; base_ref?: string; flow?: string; approve_plan?: boolean } & RunTarget,
 ) => post<RunDetail>("/runs/check-change", body);
 export const startAgentRun = (
-  body: { agent: string; task: string; route?: string; mode: RunMode } & RunTarget,
+  body: { agent: string; task: string; route?: string; mode: RunMode; approve_plan?: boolean } & RunTarget,
 ) => post<RunDetail>("/runs/agent", body);
 export const saveAsTest = (runId: string, body: { title?: string; folder?: "isolated" | "live" }) =>
   post<RunDetail>(`/runs/${encodeURIComponent(runId)}/save-test`, body);

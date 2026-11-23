@@ -58,16 +58,19 @@ def test_store_test_cases_maps_review_status_to_case_status_and_note(tmp_path: P
     assert approved.status == "planned"
     assert approved.note is None
     assert approved.review_note is None
+    assert approved.review_status == "approved"
 
     rewritten = by_title["Tightened case"]
     assert rewritten.status == "planned"
     assert rewritten.note is None
     assert rewritten.review_note == "Tightened the vague expected line"
+    assert rewritten.review_status == "rewritten"
 
     rejected = by_title["Unfixable case"]
     assert rejected.status == "skipped"
     assert rejected.note == "No file:line given; can't fix without inventing one"
     assert rejected.review_note is None
+    assert rejected.review_status == "rejected"
 
 
 def test_store_test_cases_falls_back_to_scenarios_when_no_cases_were_reviewed(

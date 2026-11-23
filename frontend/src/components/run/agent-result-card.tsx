@@ -12,7 +12,7 @@ const STEP_ICON: Record<Step["status"], React.ReactNode> = {
 
 export function AgentResultCard({ runId, result }: { runId: string; result: AgentResult }) {
   return (
-    <article className="grid gap-3 rounded-xl border bg-card p-4">
+    <article className="grid min-w-0 grid-cols-1 gap-3 rounded-xl border bg-card p-4">
       <header className="flex flex-wrap items-center gap-2">
         <h3 className="font-medium">{agentLabel(result.agent)}</h3>
         <VerdictBadge verdict={result.verdict} />
@@ -32,7 +32,7 @@ export function AgentResultCard({ runId, result }: { runId: string; result: Agen
           <h4 className="text-sm font-medium">Steps (as reported by the agent)</h4>
           <ol className="grid gap-2">
             {result.steps.map((step) => (
-              <li key={step.index} className="grid gap-2 rounded-lg border p-2 text-sm sm:grid-cols-[1fr_10rem]">
+              <li key={step.index} className="grid gap-2 rounded-lg border p-2 text-sm sm:grid-cols-[minmax(0,1fr)_10rem]">
                 <div className="flex items-start gap-2">
                   {STEP_ICON[step.status]}
                   <div>

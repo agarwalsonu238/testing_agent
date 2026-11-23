@@ -10,6 +10,8 @@ FailureCategory = Literal[
 ]
 RunKind = Literal["quick-scan", "check-change", "agent", "save-test", "saved-test"]
 RunStatus = Literal["running", "finished"]
+# Where a Check my change / agent run is in the pipeline (None for runs that have no pipeline).
+RunStage = Literal["planning", "reviewing", "awaiting_approval", "running", "reporting", "done"]
 RunMode = Literal["mocked", "real"]
 FindingStatus = Literal["open", "accepted", "ignored"]
 EvidenceKind = Literal["screenshot", "design", "console", "network", "code", "log", "trace"]
@@ -73,6 +75,8 @@ class AgentResult(BaseModel):
 
 
 CaseStatus = Literal["planned", "pass", "fail", "blocked", "skipped"]
+# What the test-case reviewer decided about a case (None when no review ran).
+CaseReview = Literal["approved", "rewritten", "rejected"]
 
 
 class TestCase(BaseModel):
@@ -91,6 +95,7 @@ class TestCase(BaseModel):
     # Set when the test-case reviewer rewrote this case (what changed) or rejected it (why);
     # None for a case the reviewer approved unchanged, or when no review ran.
     review_note: str | None = None
+    review_status: CaseReview | None = None
 
 
 class Artifact(BaseModel):
@@ -119,6 +124,7 @@ class RunParams(BaseModel):
     base_ref: str | None = None
     source_run_id: str | None = None
     test_id: str | None = None
+    approve_plan: bool = False  # pause for the developer to approve the reviewed test cases
 
 
 class ApiField(BaseModel):
@@ -173,6 +179,9 @@ class RunRecord(BaseModel):
     artifacts: list[Artifact] = []
     api_references: list[ApiReference] = []
     saved_test: SavedTestInfo | None = None
+    stage: RunStage | None = None
+    activity: str | None = None  # one line on what the run is doing right now
+    awaiting_approval: bool = False  # paused until the developer approves the test cases
 
 
 class RunCounts(BaseModel):
@@ -230,6 +239,7 @@ class CheckChangeRequest(TargetRequest):
     mode: RunMode = "mocked"
     base_ref: str | None = Field(default=None, max_length=200, pattern=r"^[\w./~^@{}-]+$")
     flow: str | None = Field(default=None, max_length=4000)
+    approve_plan: bool = False
 
 
 class AgentRunRequest(TargetRequest):
@@ -237,6 +247,13 @@ class AgentRunRequest(TargetRequest):
     task: str = Field(min_length=3, max_length=4000)
     route: str | None = Field(default=None, pattern=r"^/[^\s]*$", max_length=300)
     mode: RunMode = "mocked"
+    approve_plan: bool = False
+
+
+class ApproveRequest(BaseModel):
+    """The developer's go-ahead for the reviewed test cases; `skip` lists case IDs not to run."""
+
+    skip: list[str] = Field(default_factory=list, max_length=200)
 
 
 class SaveTestRequest(BaseModel):

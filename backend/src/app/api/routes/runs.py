@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from app.api.deps import DepsDep, ManagerDep
 from app.schemas.runs import (
     AgentRunRequest,
+    ApproveRequest,
     CheckChangeRequest,
     Finding,
     FindingDecision,
@@ -69,6 +70,13 @@ async def get_run_file(run_id: RunId, path: str, manager: ManagerDep) -> FileRes
 @router.post("/{run_id}/cancel", response_model=RunDetail)
 async def cancel_run(run_id: RunId, manager: ManagerDep) -> RunDetail:
     await manager.cancel(run_id)
+    return to_detail(await manager.get(run_id))
+
+
+@router.post("/{run_id}/approve", response_model=RunDetail)
+async def approve_run(run_id: RunId, body: ApproveRequest, manager: ManagerDep) -> RunDetail:
+    """Let a run that is waiting on the developer carry on with the reviewed test cases."""
+    await manager.approve(run_id, body.skip)
     return to_detail(await manager.get(run_id))
 
 
