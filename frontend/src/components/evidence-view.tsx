@@ -8,7 +8,7 @@ export function EvidenceView({ runId, evidence }: { runId: string; evidence: Evi
   if (evidence.length === 0) return null;
 
   return (
-    <div className="grid gap-2">
+    <div className="grid grid-cols-1 gap-2">
       {images.length > 0 && (
         <details className="group">
           <summary className="inline-flex w-fit cursor-pointer list-none items-center gap-1 rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
