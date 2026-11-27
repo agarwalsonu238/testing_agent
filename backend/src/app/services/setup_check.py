@@ -169,6 +169,14 @@ async def _repo_item(settings: Settings) -> SetupItem:
             detail="Not set",
             fix="Needed for Check my change, the Code reviewer and Save as test",
         )
+    if not repo.is_dir():
+        return SetupItem(
+            key="app_repo",
+            label=label,
+            status="fail",
+            detail=f"{repo} doesn't exist",
+            fix="Point APP_REPO_PATH in .env at your app's checkout",
+        )
     if not await git.is_repo(repo):
         return SetupItem(
             key="app_repo", label=label, status="fail", detail=f"{repo} isn't a git repository"

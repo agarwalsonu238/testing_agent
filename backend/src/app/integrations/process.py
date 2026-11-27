@@ -38,6 +38,9 @@ async def run_process(
             stderr=asyncio.subprocess.PIPE,
         )
     except FileNotFoundError as exc:
+        # A missing cwd raises the same error as a missing binary; say which it was.
+        if cwd is not None and not await asyncio.to_thread(cwd.is_dir):
+            raise ProcessError(f"Working folder {cwd} doesn't exist") from exc
         raise ProcessError(f"`{argv[0]}` was not found on PATH") from exc
     try:
         out, err = await asyncio.wait_for(

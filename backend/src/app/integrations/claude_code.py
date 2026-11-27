@@ -260,6 +260,12 @@ class ClaudeCode:
                 limit=_STREAM_LIMIT,
             )
         except FileNotFoundError as exc:
+            # A missing cwd raises the same error as a missing binary; say which it was.
+            if not inv.cwd.is_dir():
+                raise ClaudeCodeError(
+                    f"App folder {inv.cwd} doesn't exist. Set APP_REPO_PATH in .env "
+                    "to your app's checkout"
+                ) from exc
             raise ClaudeCodeError(f"`{self._settings.claude_bin}` was not found on PATH") from exc
 
         assert proc.stdin and proc.stdout and proc.stderr  # noqa: S101 - pipes requested above
