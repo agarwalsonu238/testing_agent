@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 /** Minimal shape of the Web Speech API (not in lib.dom.d.ts); only what we use. */
 interface SpeechRecognitionAlternative {
@@ -40,13 +40,22 @@ function getSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
   return typeof ctor === "function" ? (ctor as SpeechRecognitionCtor) : null;
 }
 
+/** Speech support never changes during a page's life, so there is nothing to subscribe to. */
+const noopSubscribe = () => () => {};
+
 /**
  * Dictate into a text field with the browser's built-in speech recognition (Chrome/Edge; no
  * extra dependency). `supported` is false everywhere else, so callers can just not render a mic
  * button rather than show one that doesn't work.
  */
 export function useSpeechToText(onFinalText: (text: string) => void) {
-  const [supported] = useState(() => getSpeechRecognitionCtor() !== null);
+  // false on the server AND during hydration, then the real answer: reading `window` in the first
+  // render made the server (no mic button) and the browser (a mic button) disagree.
+  const supported = useSyncExternalStore(
+    noopSubscribe,
+    () => getSpeechRecognitionCtor() !== null,
+    () => false,
+  );
   const [listening, setListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
