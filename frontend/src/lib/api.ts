@@ -234,6 +234,8 @@ export type QaConfigSummary = {
   viewports: string[];
   agents: AgentInfo[];
   designs: string[];
+  /** True when the backend can open the Mac's own folder picker (local Mac backend only). */
+  can_pick_folder?: boolean;
 };
 
 export type SavedTest = {
@@ -253,6 +255,8 @@ export const getHealth = (init?: RequestInit) => apiFetch<HealthResponse>("/heal
 export const getSetupCheck = (live: boolean, init?: RequestInit) =>
   apiFetch<SetupCheck>(`/setup-check?live=${live}`, init);
 export const getQaConfig = (init?: RequestInit) => apiFetch<QaConfigSummary>("/qa-config", init);
+/** Opens the Mac's folder picker on the backend's machine; `path` is null when the user cancels. */
+export const pickFolder = (init?: RequestInit) => post<{ path: string | null }>("/pick-folder", {}, init);
 
 export const listRuns = (init?: RequestInit) => apiFetch<RunSummary[]>("/runs", init);
 export const getRun = (id: string, init?: RequestInit) =>

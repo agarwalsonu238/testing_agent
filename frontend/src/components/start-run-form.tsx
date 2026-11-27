@@ -1,5 +1,6 @@
 "use client";
 
+import { FolderOpen } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useState } from "react";
 
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { useApiData } from "@/hooks/use-api-data";
 import {
   getQaConfig,
+  pickFolder,
   startAgentRun,
   startCheckChange,
   startQuickScan,
@@ -61,6 +63,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
   const [repoPath, setRepoPath] = useState("");
   const [approvePlan, setApprovePlan] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // An empty field means "the server's default", so show that default as the placeholder.
   const config = useApiData("qa-config", (signal) => getQaConfig({ signal }));
@@ -78,6 +81,19 @@ export function StartRunForm({ variant }: { variant: Variant }) {
 
   function appendDictated(chunk: string) {
     setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${chunk}` : chunk));
+  }
+
+  async function browse() {
+    setPicking(true);
+    setError(null);
+    try {
+      const { path } = await pickFolder();
+      if (path) setRepoPath(path);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPicking(false);
+    }
   }
 
   async function submit(e: React.FormEvent) {
@@ -141,15 +157,23 @@ export function StartRunForm({ variant }: { variant: Variant }) {
           <label htmlFor={`${id}-repo`} className={labelClass}>
             Project folder{needsRepo ? "" : " (optional)"}
           </label>
-          <input
-            id={`${id}-repo`}
-            className={`${fieldClass} font-mono`}
-            value={repoPath}
-            required={needsRepo}
-            maxLength={1000}
-            onChange={(e) => setRepoPath(e.target.value)}
-            placeholder={defaults?.app_repo_path || "/Users/you/Desktop/GitHub/my-project"}
-          />
+          <div className="flex gap-2">
+            <input
+              id={`${id}-repo`}
+              className={`${fieldClass} min-w-0 flex-1 font-mono`}
+              value={repoPath}
+              required={needsRepo}
+              maxLength={1000}
+              onChange={(e) => setRepoPath(e.target.value)}
+              placeholder={defaults?.app_repo_path || "/Users/you/Desktop/GitHub/my-project"}
+            />
+            {defaults?.can_pick_folder && (
+              <Button type="button" variant="outline" onClick={browse} disabled={picking || busy}>
+                <FolderOpen aria-hidden="true" />
+                {picking ? "Choose in the window…" : "Browse…"}
+              </Button>
+            )}
+          </div>
         </div>
         <p className="text-xs text-muted-foreground">
           Any project, any stack: the full path to its folder on this computer. Remembered for your next run.

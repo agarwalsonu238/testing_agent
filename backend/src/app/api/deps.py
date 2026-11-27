@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, Request, status
 from app.core.config import Settings, get_settings
 from app.integrations.claude_code import ClaudeCode
 from app.integrations.external_reviewer import ExternalReviewer
+from app.integrations.folder_picker import FolderPicker
 from app.integrations.http_probe import HttpProbe
 from app.schemas.qa_config import QaConfig
 from app.services.agents import AgentDeps
@@ -44,6 +45,10 @@ def get_claude(settings: SettingsDep) -> ClaudeCode:
     return ClaudeCode(settings)
 
 
+def get_folder_picker() -> FolderPicker:
+    return FolderPicker()
+
+
 def get_qa_config(settings: SettingsDep) -> QaConfig:
     return load_qa_config(settings)
 
@@ -68,3 +73,4 @@ DepsDep = Annotated[AgentDeps, Depends(get_agent_deps)]
 ClaudeDep = Annotated[ClaudeCode, Depends(get_claude)]
 ProbeDep = Annotated[HttpProbe, Depends(get_probe)]
 QaConfigDep = Annotated[QaConfig, Depends(get_qa_config)]
+FolderPickerDep = Annotated[FolderPicker, Depends(get_folder_picker)]

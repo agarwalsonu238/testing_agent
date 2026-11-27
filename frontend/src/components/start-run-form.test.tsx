@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { StartRunForm } from "./start-run-form";
@@ -64,5 +64,27 @@ describe("StartRunForm", () => {
 
     expect(await screen.findByDisplayValue("/repos/zoqo")).toBeInTheDocument();
     expect(screen.getByDisplayValue("https://app.zoqo.test")).toBeInTheDocument();
+  });
+
+  it("fills the project folder from the Mac folder picker", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).endsWith("/pick-folder")
+        ? new Response(JSON.stringify({ path: "/Users/me/GitHub/zoqo-v2" }), { status: 200 })
+        : new Response(JSON.stringify({ ...config, can_pick_folder: true }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<StartRunForm variant={{ kind: "quick-scan" }} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Browse/ }));
+
+    expect(await screen.findByDisplayValue("/Users/me/GitHub/zoqo-v2")).toBeInTheDocument();
+  });
+
+  it("hides Browse when the backend can't open a picker", async () => {
+    stubFetch(() => new Response(JSON.stringify({ ...config, can_pick_folder: false }), { status: 200 }));
+    render(<StartRunForm variant={{ kind: "quick-scan" }} />);
+
+    await screen.findByPlaceholderText("/repos/example-app");
+    expect(screen.queryByRole("button", { name: /Browse/ })).not.toBeInTheDocument();
   });
 });

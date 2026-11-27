@@ -32,6 +32,12 @@ class QaConfigSummary(BaseModel):
     viewports: list[str]
     agents: list[AgentInfo]
     designs: list[str]  # design file names found in DESIGNS_DIR
+    # True when the backend can open the Mac's folder picker (local Mac, no API token).
+    can_pick_folder: bool = False
+
+
+class PickedFolder(BaseModel):
+    path: str | None  # None when the developer cancelled
 
 
 class SavedTest(BaseModel):
