@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter
 
 from app.api.deps import ClaudeDep, ProbeDep, QaConfigDep, SettingsDep
@@ -20,9 +22,13 @@ async def setup_check(
 @router.get("/qa-config", response_model=QaConfigSummary)
 async def qa_config(settings: SettingsDep, qa: QaConfigDep) -> QaConfigSummary:
     agents = load_agents(settings.agents_dir)
+    # Only offer the default folder when it exists, so the form never shows an unusable path
+    # (like .env.example's placeholder) as if it were the default.
+    repo = settings.app_repo_path
+    repo_ok = repo is not None and await asyncio.to_thread(repo.is_dir)
     return QaConfigSummary(
         app_url=settings.app_url,
-        app_repo_path=str(settings.app_repo_path) if settings.app_repo_path else None,
+        app_repo_path=str(repo) if repo_ok else None,
         pages=[p.path for p in qa.pages],
         viewports=list(qa.viewports),
         agents=[

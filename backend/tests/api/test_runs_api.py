@@ -8,7 +8,7 @@ from httpx import AsyncClient
 from pydantic import SecretStr
 
 from app.api.deps import get_claude
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.integrations import git
 from app.integrations.claude_code import AgentInvocation, ClaudeRunResult, ProgressFn
 from app.schemas.runs import AgentResult, Finding, RunParams
@@ -449,3 +449,15 @@ async def test_single_agent_plans_and_stores_test_cases_before_running(
         ("TC-2", "skipped"),  # the agent never reported it
     ]
     assert any(a["path"] == "test-cases.json" for a in detail["artifacts"])
+
+
+async def test_qa_config_hides_a_default_folder_that_does_not_exist(
+    client: AsyncClient, app: FastAPI, settings: Settings, tmp_path: Path
+) -> None:
+    missing = settings.model_copy(update={"app_repo_path": tmp_path / "nope"})
+    app.dependency_overrides[get_settings] = lambda: missing
+    assert (await client.get("/api/v1/qa-config")).json()["app_repo_path"] is None
+
+    real = settings.model_copy(update={"app_repo_path": tmp_path})
+    app.dependency_overrides[get_settings] = lambda: real
+    assert (await client.get("/api/v1/qa-config")).json()["app_repo_path"] == str(tmp_path)

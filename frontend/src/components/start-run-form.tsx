@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { fieldClass, labelClass } from "@/components/form-styles";
 import { MicButton } from "@/components/mic-button";
@@ -21,6 +21,27 @@ type Variant =
   | { kind: "quick-scan" }
   | { kind: "check-change" }
   | { kind: "agent"; agent: string; needsRoute: boolean };
+
+// The last project tested from this browser, so the folder is typed once, not on every run.
+const LAST_TARGET_KEY = "qa.lastTarget";
+type SavedTarget = { appUrl?: string; repoPath?: string };
+
+function readLastTarget(): SavedTarget {
+  try {
+    const raw = window.localStorage.getItem(LAST_TARGET_KEY);
+    return raw ? (JSON.parse(raw) as SavedTarget) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveLastTarget(target: SavedTarget) {
+  try {
+    window.localStorage.setItem(LAST_TARGET_KEY, JSON.stringify(target));
+  } catch {
+    // Storage blocked (private window): the form still works, it just won't remember.
+  }
+}
 
 const SUBMIT_LABEL: Record<Variant["kind"], string> = {
   "quick-scan": "Run Quick Scan",
@@ -42,7 +63,18 @@ export function StartRunForm({ variant }: { variant: Variant }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // An empty field means "the server's default", so show that default as the placeholder.
-  const defaults = useApiData("qa-config", (signal) => getQaConfig({ signal })).data;
+  const config = useApiData("qa-config", (signal) => getQaConfig({ signal }));
+  const defaults = config.data;
+  // Agents run inside the project folder, so only Quick Scan can do without one.
+  const needsRepo = variant.kind !== "quick-scan" && !config.loading && !defaults?.app_repo_path;
+
+  useEffect(() => {
+    const last = readLastTarget();
+    // Read after mount: localStorage doesn't exist during the server render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from browser storage
+    if (last.appUrl) setAppUrl(last.appUrl);
+    if (last.repoPath) setRepoPath(last.repoPath);
+  }, []);
 
   function appendDictated(chunk: string) {
     setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${chunk}` : chunk));
@@ -57,6 +89,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
         app_url: appUrl.trim() || undefined,
         app_repo_path: repoPath.trim() || undefined,
       };
+      saveLastTarget({ appUrl: target.app_url, repoPath: target.app_repo_path });
       let run: RunDetail;
       if (variant.kind === "quick-scan") {
         run = await startQuickScan(mode, target);
@@ -89,7 +122,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
   return (
     <form onSubmit={submit} className="grid max-w-2xl gap-5" aria-describedby={error ? errorId : undefined}>
       <fieldset className="grid gap-3 rounded-lg border p-4">
-        <legend className="px-1 text-sm font-medium">Project to test (optional)</legend>
+        <legend className="px-1 text-sm font-medium">Project to test</legend>
         <div className="grid gap-1">
           <label htmlFor={`${id}-app-url`} className={labelClass}>
             App URL
@@ -106,20 +139,23 @@ export function StartRunForm({ variant }: { variant: Variant }) {
         </div>
         <div className="grid gap-1">
           <label htmlFor={`${id}-repo`} className={labelClass}>
-            Project folder
+            Project folder{needsRepo ? "" : " (optional)"}
           </label>
           <input
             id={`${id}-repo`}
             className={`${fieldClass} font-mono`}
             value={repoPath}
+            required={needsRepo}
             maxLength={1000}
             onChange={(e) => setRepoPath(e.target.value)}
             placeholder={defaults?.app_repo_path || "/Users/you/Desktop/GitHub/my-project"}
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Any project, any stack. Leave both empty to use the server&apos;s default (APP_URL and APP_REPO_PATH
-          {defaults ? ", shown above" : ""}).
+          Any project, any stack: the full path to its folder on this computer. Remembered for your next run.
+          {needsRepo
+            ? " The server has no default folder, so enter one here."
+            : " Leave empty to use the server's default, shown above."}
         </p>
       </fieldset>
 

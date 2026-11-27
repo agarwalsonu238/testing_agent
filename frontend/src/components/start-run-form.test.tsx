@@ -6,7 +6,10 @@ import type { QaConfigSummary } from "@/lib/api";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+});
 
 const config: QaConfigSummary = {
   app_url: "https://app.example.test",
@@ -34,5 +37,32 @@ describe("StartRunForm", () => {
 
     expect(await screen.findByPlaceholderText("https://my-app.example.com")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("/Users/you/Desktop/GitHub/my-project")).toBeInTheDocument();
+  });
+
+  it("requires a project folder for an agent when the server has no default", async () => {
+    stubFetch(() => new Response(JSON.stringify({ ...config, app_repo_path: null }), { status: 200 }));
+    render(<StartRunForm variant={{ kind: "agent", agent: "functionality-tester", needsRoute: false }} />);
+
+    expect(await screen.findByText(/has no default folder/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Project folder")).toBeRequired();
+  });
+
+  it("keeps the folder optional for Quick Scan", async () => {
+    stubFetch(() => new Response(JSON.stringify({ ...config, app_repo_path: null }), { status: 200 }));
+    render(<StartRunForm variant={{ kind: "quick-scan" }} />);
+
+    expect(await screen.findByLabelText("Project folder (optional)")).not.toBeRequired();
+  });
+
+  it("prefills the project last tested from this browser", async () => {
+    window.localStorage.setItem(
+      "qa.lastTarget",
+      JSON.stringify({ appUrl: "https://app.zoqo.test", repoPath: "/repos/zoqo" }),
+    );
+    stubFetch(() => new Response(JSON.stringify(config), { status: 200 }));
+    render(<StartRunForm variant={{ kind: "quick-scan" }} />);
+
+    expect(await screen.findByDisplayValue("/repos/zoqo")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("https://app.zoqo.test")).toBeInTheDocument();
   });
 });
