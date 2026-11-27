@@ -4,10 +4,12 @@ import { VerdictBadge } from "@/components/badges";
 import { agentLabel } from "@/components/finding-card";
 import { runFileUrl, type AgentResult, type Step } from "@/lib/api";
 
+// shrink-0: in a flex row next to long, wrapping text the icon would otherwise be squeezed.
+const ICON = "size-4 shrink-0 mt-0.5";
 const STEP_ICON: Record<Step["status"], React.ReactNode> = {
-  pass: <CircleCheck className="size-4 text-emerald-600" aria-label="pass" />,
-  fail: <CircleX className="size-4 text-red-600" aria-label="fail" />,
-  skipped: <CircleMinus className="size-4 text-muted-foreground" aria-label="skipped" />,
+  pass: <CircleCheck className={`${ICON} text-emerald-600`} aria-label="pass" />,
+  fail: <CircleX className={`${ICON} text-red-600`} aria-label="fail" />,
+  skipped: <CircleMinus className={`${ICON} text-muted-foreground`} aria-label="skipped" />,
 };
 
 export function AgentResultCard({ runId, result }: { runId: string; result: AgentResult }) {
