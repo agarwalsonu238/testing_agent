@@ -7,7 +7,9 @@ import { fieldClass, labelClass } from "@/components/form-styles";
 import { MicButton } from "@/components/mic-button";
 import { ModePicker } from "@/components/mode-picker";
 import { Button } from "@/components/ui/button";
+import { useApiData } from "@/hooks/use-api-data";
 import {
+  getQaConfig,
   startAgentRun,
   startCheckChange,
   startQuickScan,
@@ -39,6 +41,8 @@ export function StartRunForm({ variant }: { variant: Variant }) {
   const [approvePlan, setApprovePlan] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // An empty field means "the server's default", so show that default as the placeholder.
+  const defaults = useApiData("qa-config", (signal) => getQaConfig({ signal })).data;
 
   function appendDictated(chunk: string) {
     setText((prev) => (prev.trim() ? `${prev.replace(/\s+$/, "")} ${chunk}` : chunk));
@@ -97,7 +101,7 @@ export function StartRunForm({ variant }: { variant: Variant }) {
             maxLength={500}
             pattern="https?://\S+"
             onChange={(e) => setAppUrl(e.target.value)}
-            placeholder="https://my-app.example.com"
+            placeholder={defaults?.app_url || "https://my-app.example.com"}
           />
         </div>
         <div className="grid gap-1">
@@ -110,11 +114,12 @@ export function StartRunForm({ variant }: { variant: Variant }) {
             value={repoPath}
             maxLength={1000}
             onChange={(e) => setRepoPath(e.target.value)}
-            placeholder="/Users/you/Desktop/GitHub/my-project"
+            placeholder={defaults?.app_repo_path || "/Users/you/Desktop/GitHub/my-project"}
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Any project, any stack. Leave both empty to use the server&apos;s default (APP_URL and APP_REPO_PATH).
+          Any project, any stack. Leave both empty to use the server&apos;s default (APP_URL and APP_REPO_PATH
+          {defaults ? ", shown above" : ""}).
         </p>
       </fieldset>
 
