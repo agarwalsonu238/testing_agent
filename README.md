@@ -33,8 +33,9 @@ You need the app under test running on `localhost`, Node.js 22+, uv, and a Claud
 3. **Browser:** `cd backend && uv run playwright install chromium`. On macOS 12, current Playwright can't run its
    own Chromium: set `BROWSER_CHANNEL=chrome` in `backend/.env` to use installed Google Chrome instead.
 4. **Configure:** `cp backend/.env.example backend/.env` (the start script does this too) and set at least
-   `APP_URL` and `APP_REPO_PATH`. List your pages, risky endpoints, mocks and test folders in
-   [`backend/qa/qa.config.json`](backend/qa/qa.config.json). Put design PNGs in [`backend/designs/`](backend/designs/README.md).
+   `APP_URL` and `APP_REPO_PATH` (the default project; each run can point at another one). That's enough
+   for any project: with no pages listed, Quick Scan discovers them by following links from `/`. To tune a
+   project, add [project settings](#project-settings-qaqaconfigjson) to *its* repo, not to this one.
 5. **Start:** `./run-local-dev.sh` → dashboard http://localhost:4000, backend http://127.0.0.1:8400/docs.
 6. **Setup check:** open http://localhost:4000/setup and click **Run a test on my login**; everything should be green.
 7. **First run:** Quick Scan, then **Check my change** on a small branch.
@@ -45,7 +46,10 @@ Agent runs count toward your plan's usage limits: run Quick Scan first and point
 
 ```
 backend/qa/agents/*.md      Claude Code subagent definitions (QA Lead, Design reviewer, …) — portable
-backend/qa/qa.config.json   pages, viewports, limits, noise filter, risky endpoints, mocks, login, test folders
+backend/qa/qa.config.json   the tool's generic defaults: viewports, limits, framework noise, generic risky endpoints
+<project>/.qa/qa.config.json
+                            optional, in the tested repo: its pages, risky endpoints, mocks, login, test folders
+<project>/.qa/designs/      optional, in the tested repo: design PNGs (else DESIGNS_DIR)
 backend/qa/init-page.template.ts
                             Playwright MCP init-page per agent run: blocks/mocks risky endpoints and records
                             console errors and failed requests (flow verdicts come from this, not the model)
@@ -77,6 +81,30 @@ fails, Claude reviews instead and the run says so.
 Docker (`docker compose up --build`) serves the dashboard only; real runs need `./run-local-dev.sh`.
 
 Per-app details: [frontend/README.md](frontend/README.md), [backend/README.md](backend/README.md).
+
+## Project settings (`.qa/qa.config.json`)
+
+Nothing about the app under test lives in this repo. Each project can keep its own settings in a
+`.qa/qa.config.json` at its repo root; the run that targets that project reads it, and no other run does.
+It's laid over the tool's defaults in [`backend/qa/qa.config.json`](backend/qa/qa.config.json):
+
+| Keys | Rule |
+|---|---|
+| `noise_filter`, `risky_endpoints`, `mocks` | added to the defaults (a project can't drop a default safety rule) |
+| `limits`, `auth`, `tests`, `changes` | field by field: set only what differs |
+| anything else (`pages`, `viewports`, `api_checks`, …) | replaces the default |
+
+```json
+{
+  "pages": [{ "path": "/", "name": "Home" }, { "path": "/pricing", "name": "Pricing" }],
+  "risky_endpoints": [{ "url": "*/api/billing/*", "method": "POST" }],
+  "tests": { "isolated_dir": "frontend/tests/e2e/isolated", "pr_base": "dev" }
+}
+```
+
+Leave `pages` out and Quick Scan discovers up to `limits.max_pages` (15) same-site pages from links. Put
+design PNGs in the project's `.qa/designs/` ([naming](backend/designs/README.md)). The Setup check
+shows which settings applied.
 
 ## Using it from other AI coding tools
 

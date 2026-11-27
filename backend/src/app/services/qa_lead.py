@@ -48,6 +48,7 @@ from app.services.agents import (
     report_agent,
 )
 from app.services.api_reference import agent_notes, build_references
+from app.services.qa_config import designs_dir
 from app.services.run_manager import RunContext
 
 MAX_DESIGN_ROUTES = 3
@@ -531,7 +532,7 @@ def _design_calls(
         designs = copy_designs(s, route, ctx.dir)
         if not designs and not s.figma_mcp_url:
             ctx.event(
-                f"Design reviewer skipped {route}: no design PNG in {s.designs_dir}", level="warn"
+                f"Design reviewer skipped {route}: no design PNG in {designs_dir(s)}", level="warn"
             )
             continue
         call = design_call(deps, route, mode, designs)
@@ -555,8 +556,9 @@ def design_call(
     # The design-reviewer needs Read access to its copied design PNG(s), nothing else from the
     # run folder — never the diff, which lives in the run folder's root.
     add_dirs = list({p.parent for p in designs.values()})
-    if s.designs_dir.is_dir():
-        add_dirs.append(s.designs_dir.resolve())
+    folder = designs_dir(s)
+    if folder.is_dir():
+        add_dirs.append(folder.resolve())
     return AgentCall(
         agent=get_agent(deps.settings, DESIGN_REVIEWER),
         task=f"Compare {url} with its design at desktop (1440x900) and mobile (390x844) size.",
@@ -617,7 +619,7 @@ async def run_single_agent(
         designs = copy_designs(s, route, ctx.dir)
         if not designs and not s.figma_mcp_url:
             raise PreconditionError(
-                f"No design PNG for {route} in {s.designs_dir} and no Figma MCP"
+                f"No design PNG for {route} in {designs_dir(s)} and no Figma MCP"
             )
         call = design_call(deps, route, mode, designs)
         call.task = f"{call.task}\n{task}"

@@ -12,8 +12,9 @@ export default function QuickScanPage() {
           Quick Scan
         </h1>
         <p className="max-w-2xl text-muted-foreground">
-          No AI. Opens every page in the QA config at desktop and mobile size, scrolls to the bottom, and reports
-          console errors, failed or slow API calls, broken images and links, and pages wider than the screen.
+          No AI. Opens every page the project lists (or, with none listed, the pages it finds by following links
+          from the home page) at desktop and mobile size, scrolls to the bottom, and reports console errors, failed
+          or slow API calls, broken images and links, and pages wider than the screen.
         </p>
       </div>
       <StartRunForm variant={{ kind: "quick-scan" }} />

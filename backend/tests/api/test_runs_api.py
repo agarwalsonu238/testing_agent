@@ -357,8 +357,7 @@ async def test_cancel_a_finished_run_is_409(client: AsyncClient, app: FastAPI) -
 async def test_qa_config_lists_agents_and_pages(client: AsyncClient) -> None:
     body = (await client.get("/api/v1/qa-config")).json()
     assert {a["name"] for a in body["agents"]} >= {"qa-lead", "code-reviewer"}
-    assert body["pages"][0] == "/"
-    assert len(body["pages"]) == 10  # backend/qa/qa.config.json's page list
+    assert body["pages"] == []  # the tool's defaults list no pages: Quick Scan discovers them
     assert body["viewports"] == ["desktop", "mobile"]
 
 

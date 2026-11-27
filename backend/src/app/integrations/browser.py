@@ -27,8 +27,10 @@ from playwright.async_api import (
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeout
 
-_SKIP_LINK = ("mailto:", "tel:", "javascript:", "#")
-_SKIP_LINK_PATH = ("logout", "log-out", "signout", "sign-out")
+SKIP_LINK = ("mailto:", "tel:", "javascript:", "#")
+SKIP_LINK_PATH = ("logout", "log-out", "signout", "sign-out")
+_SKIP_LINK = SKIP_LINK
+_SKIP_LINK_PATH = SKIP_LINK_PATH
 
 _SCROLL_JS = """async () => {
   for (let i = 0; i < 40; i++) {
@@ -91,6 +93,7 @@ class PageObservation:
     requests: list[RequestRecord] = field(default_factory=list)
     broken_images: list[str] = field(default_factory=list)
     broken_links: list[tuple[str, str]] = field(default_factory=list)  # (url, status or error)
+    links: list[str] = field(default_factory=list)  # every a[href] on the page (for page discovery)
     overflow_px: int = 0
     screenshot: Path | None = None
     blocked: list[str] = field(default_factory=list)
@@ -310,10 +313,9 @@ class BrowserSession:
             obs.overflow_px = int(await page.evaluate(_OVERFLOW_JS))
             await page.screenshot(path=str(screenshot_path), full_page=True)
             obs.screenshot = screenshot_path
-            links = await page.evaluate(_LINKS_JS)
-            obs.broken_links = await self._check_links(
-                context, base_url, list(links), max_links, decide
-            )
+            links = [str(link) for link in await page.evaluate(_LINKS_JS)]
+            obs.links = links
+            obs.broken_links = await self._check_links(context, base_url, links, max_links, decide)
         except PlaywrightError as exc:
             obs.nav_error = str(exc).strip().splitlines()[0][:300]
         finally:

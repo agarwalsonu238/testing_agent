@@ -12,7 +12,13 @@ from app.integrations.http_probe import HttpProbe
 from app.integrations.process import ProcessError, run_process
 from app.schemas.setup import SetupCheck, SetupItem
 from app.services.agents import load_agents
-from app.services.qa_config import list_designs, load_qa_config
+from app.services.qa_config import (
+    PROJECT_CONFIG,
+    designs_dir,
+    list_designs,
+    load_qa_config,
+    project_config_path,
+)
 
 SUBSCRIPTION_AUTH_METHODS = ("claude.ai", "oauth_token")
 
@@ -194,12 +200,23 @@ def _config_items(settings: Settings) -> list[SetupItem]:
     items = []
     try:
         qa = load_qa_config(settings)
+        project = project_config_path(settings)
+        source = (
+            f"tool defaults + {project}"
+            if project
+            else f"tool defaults (add {PROJECT_CONFIG} to the project to customise)"
+        )
+        pages = (
+            f"{len(qa.pages)} page(s) listed"
+            if qa.pages
+            else f"pages discovered from links (up to {qa.limits.max_pages})"
+        )
         items.append(
             SetupItem(
                 key="qa_config",
                 label="QA config",
                 status="pass",
-                detail=f"{len(qa.pages)} page(s), viewports: {', '.join(qa.viewports)}",
+                detail=f"{source}; {pages}; viewports: {', '.join(qa.viewports)}",
             )
         )
     except PreconditionError as exc:
@@ -219,8 +236,9 @@ def _config_items(settings: Settings) -> list[SetupItem]:
             SetupItem(key="agents", label="Agent definitions", status="fail", detail=str(exc))
         )
     designs = list_designs(settings)
+    folder = designs_dir(settings)
     if designs or settings.figma_mcp_url:
-        detail = f"{len(designs)} PNG(s) in {settings.designs_dir}" + (
+        detail = f"{len(designs)} PNG(s) in {folder}" + (
             "; Figma MCP configured" if settings.figma_mcp_url else ""
         )
         items.append(SetupItem(key="designs", label="Designs", status="pass", detail=detail))
@@ -230,7 +248,7 @@ def _config_items(settings: Settings) -> list[SetupItem]:
                 key="designs",
                 label="Designs",
                 status="pass",
-                detail=f"No PNGs in {settings.designs_dir} (optional: only the Design reviewer "
+                detail=f"No PNGs in {folder} (optional: only the Design reviewer "
                 "uses them; export <route>.desktop.png and <route>.mobile.png to enable it)",
             )
         )

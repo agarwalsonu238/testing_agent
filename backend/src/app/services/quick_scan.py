@@ -1,4 +1,5 @@
-"""Quick Scan (no AI): every configured page at every viewport; findings from fixed rules.
+"""Quick Scan (no AI): every configured page (or, with none listed, the pages discovered by
+following same-site links from `/`) at every viewport; findings from fixed rules.
 
 Severity (plan section 10):
 - High: page crash / uncaught error, page or API call answering 5xx or failing, page not loading
@@ -11,16 +12,21 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+from playwright.async_api import BrowserContext
+
 from app.core.config import Settings
 from app.core.errors import BlockedError
 from app.integrations.browser import (
+    SKIP_LINK,
+    SKIP_LINK_PATH,
     BrowserSession,
     BrowserUnavailableError,
+    Decide,
     LoginError,
     PageObservation,
 )
 from app.integrations.http_probe import HttpProbe
-from app.schemas.qa_config import Limits, QaConfig
+from app.schemas.qa_config import Limits, PageSpec, QaConfig
 from app.schemas.runs import Evidence, FailureCategory, Finding, RunMode, Severity
 from app.services.api_checks import run_api_checks
 from app.services.qa_config import NetworkGuard, compile_noise, route_slug
@@ -32,6 +38,71 @@ _BLOCKED_BY_GUARD = "ERR_BLOCKED_BY_CLIENT"
 # Chrome logs every failed request to the console too; the request itself is already a finding.
 BROWSER_REQUEST_ECHO = "Failed to load resource"
 _ENV_ERRORS = ("ERR_CONNECTION_REFUSED", "ERR_NAME_NOT_RESOLVED", "ERR_CONNECTION_RESET")
+
+
+# Links to these are files, not pages, so discovery never navigates to them.
+_FILE_EXTENSIONS = (
+    ".pdf",
+    ".zip",
+    ".gz",
+    ".tar",
+    ".dmg",
+    ".exe",
+    ".csv",
+    ".xlsx",
+    ".xls",
+    ".doc",
+    ".docx",
+    ".ppt",
+    ".pptx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".ico",
+    ".mp4",
+    ".mp3",
+    ".webm",
+    ".json",
+    ".xml",
+    ".txt",
+    ".rss",
+)
+
+
+def page_name(path: str) -> str:
+    """A readable name for a discovered path: `/` → "Home", `/how-it-works` → "How it works"."""
+    last = path.rstrip("/").rsplit("/", 1)[-1]
+    words = re.sub(r"[-_]+", " ", last).strip()
+    return words[:1].upper() + words[1:] if words else "Home"
+
+
+def discoverable_paths(links: list[str], base_url: str, decide: Decide) -> list[str]:
+    """Same-site page paths among a page's links, in order, without duplicates (pure).
+
+    Drops other sites, mailto/tel/javascript/anchors, logout-style links, files, and anything
+    the risky-endpoint guard would block. Query strings and #fragments are ignored, so
+    `/a?x=1` and `/a#top` both count as `/a`.
+    """
+    origin = urlparse(base_url).netloc
+    paths: list[str] = []
+    for href in links:
+        if not href or href.startswith(SKIP_LINK):
+            continue
+        parsed = urlparse(href)
+        if parsed.scheme not in ("http", "https") or parsed.netloc != origin:
+            continue
+        path = parsed.path or "/"
+        lower = path.lower()
+        if any(s in lower for s in SKIP_LINK_PATH) or lower.endswith(_FILE_EXTENSIONS):
+            continue
+        if decide(f"{parsed.scheme}://{parsed.netloc}{path}", "GET") is not None:
+            continue
+        if path not in paths:
+            paths.append(path)
+    return paths
 
 
 def _is_noise(text: str, noise: list[re.Pattern[str]]) -> bool:
@@ -241,10 +312,19 @@ async def run_quick_scan(
     def on_blocked(what: str) -> None:
         ctx.event(f"Blocked {what}", level="warn", source=AGENT)
 
+    pages: list[PageSpec] = list(qa.pages)
+    discover = not pages
+
     try:
         async with BrowserSession(settings.browser_channel, settings.browser_headless) as session:
             ctx.event(
-                f"Browser {session.version}; {mode} mode; {len(qa.pages)} pages", source=AGENT
+                f"Browser {session.version}; {mode} mode; "
+                + (
+                    f"discovering up to {qa.limits.max_pages} pages from links"
+                    if discover
+                    else f"{len(pages)} pages"
+                ),
+                source=AGENT,
             )
             state = await prepare_storage_state(
                 session, settings=settings, qa=qa, mode=mode, guard=guard, out=auth_state
@@ -259,32 +339,65 @@ async def run_quick_scan(
                     storage_state=state,
                 )
                 trace_path = traces / f"trace-{vp_name}.zip"
+
+                async def scan(
+                    page: PageSpec,
+                    vp_name: str = vp_name,
+                    context: BrowserContext = context,
+                ) -> PageObservation:
+                    ctx.event(f"Scanning {page.path} at {vp_name} size", source=AGENT)
+                    shot = shots / f"{route_slug(page.path)}-{vp_name}.png"
+                    obs = await session.scan_page(
+                        context,
+                        base_url=settings.app_url,
+                        page_path=page.path,
+                        page_name=page.name,
+                        viewport=vp_name,
+                        screenshot_path=shot,
+                        timeout_ms=qa.limits.page_timeout_ms,
+                        max_links=qa.limits.max_links_per_page,
+                        api_pattern=qa.api_url_pattern,
+                        decide=guard.decide,
+                    )
+                    rel = ctx.rel(shot) if obs.screenshot else None
+                    if rel:
+                        ctx.add_artifact(f"{page.name} · {vp_name}", shot, "screenshot")
+                    found = observations_to_findings(obs, qa.limits, noise, rel)
+                    ctx.add_findings(found)
+                    ctx.event(
+                        f"{page.path} at {vp_name}: {len(found)} finding(s)",
+                        level="warn" if found else "info",
+                        source=AGENT,
+                    )
+                    return obs
+
                 try:
-                    for page in qa.pages:
-                        ctx.event(f"Scanning {page.path} at {vp_name} size", source=AGENT)
-                        shot = shots / f"{route_slug(page.path)}-{vp_name}.png"
-                        obs = await session.scan_page(
-                            context,
-                            base_url=settings.app_url,
-                            page_path=page.path,
-                            page_name=page.name,
-                            viewport=vp_name,
-                            screenshot_path=shot,
-                            timeout_ms=qa.limits.page_timeout_ms,
-                            max_links=qa.limits.max_links_per_page,
-                            api_pattern=qa.api_url_pattern,
-                            decide=guard.decide,
-                        )
-                        rel = ctx.rel(shot) if obs.screenshot else None
-                        if rel:
-                            ctx.add_artifact(f"{page.name} · {vp_name}", shot, "screenshot")
-                        found = observations_to_findings(obs, qa.limits, noise, rel)
-                        ctx.add_findings(found)
+                    if discover:
+                        # Breadth-first from "/" at the first viewport; later viewports reuse
+                        # the same list so every size covers the same pages.
+                        queue = ["/"]
+                        while queue and len(pages) < qa.limits.max_pages:
+                            path = queue.pop(0)
+                            spec = PageSpec(path=path, name=page_name(path))
+                            pages.append(spec)
+                            obs = await scan(spec)
+                            known = {p.path for p in pages} | set(queue)
+                            queue += [
+                                p
+                                for p in discoverable_paths(
+                                    obs.links, settings.app_url, guard.decide
+                                )
+                                if p not in known
+                            ]
+                        discover = False
                         ctx.event(
-                            f"{page.path} at {vp_name}: {len(found)} finding(s)",
-                            level="warn" if found else "info",
+                            f"Discovered {len(pages)} page(s) from links: "
+                            + ", ".join(p.path for p in pages),
                             source=AGENT,
                         )
+                    else:
+                        for page in pages:
+                            await scan(page)
                 finally:
                     await session.close_context(context, trace_path)
                     if trace_path.exists():

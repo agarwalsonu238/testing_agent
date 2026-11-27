@@ -1,46 +1,4 @@
 {
-  "pages": [
-    {
-      "path": "/",
-      "name": "Home"
-    },
-    {
-      "path": "/search",
-      "name": "Search"
-    },
-    {
-      "path": "/how-it-works",
-      "name": "How it works"
-    },
-    {
-      "path": "/become-host",
-      "name": "Become a host"
-    },
-    {
-      "path": "/faqs",
-      "name": "FAQs"
-    },
-    {
-      "path": "/cancellation-policy",
-      "name": "Cancellation policy"
-    },
-    {
-      "path": "/refund-policy",
-      "name": "Refund policy"
-    },
-    {
-      "path": "/safety-standards",
-      "name": "Safety standards"
-    },
-    {
-      "path": "/trust-safety",
-      "name": "Trust & safety"
-    },
-    {
-      "path": "/terms-privacy",
-      "name": "Terms & privacy"
-    }
-  ],
   "viewports": {
     "desktop": {
       "width": 1440,
@@ -56,7 +14,8 @@
     "slow_api_ms": 2000,
     "slow_page_ms": 5000,
     "page_timeout_ms": 30000,
-    "max_links_per_page": 25
+    "max_links_per_page": 25,
+    "max_pages": 15
   },
   "noise_filter": [
     "\\[HMR\\]",
@@ -69,8 +28,7 @@
     "Download the React DevTools",
     "/favicon\\.ico",
     "\\[vite\\] (connecting|connected)",
-    "'upgrade-insecure-requests' is ignored when delivered in a report-only policy",
-    "csp-report\\.browser-intake-datadoghq\\.com"
+    "'upgrade-insecure-requests' is ignored when delivered in a report-only policy"
   ],
   "api_url_pattern": "*/api/*",
   "risky_endpoints": [
@@ -82,9 +40,6 @@
     },
     {
       "url": "*/api/*payout*"
-    },
-    {
-      "url": "*/api/hosts/me/bank-account*"
     },
     {
       "url": "*/api/admin/*",
@@ -101,10 +56,6 @@
     {
       "url": "*/api/*",
       "method": "DELETE"
-    },
-    {
-      "url": "*/api/parent-auth/signinup/code",
-      "method": "POST"
     }
   ],
   "mocks": [],
@@ -112,21 +63,5 @@
   "auth": {
     "mock_storage_state": null,
     "login": null
-  },
-  "tests": {
-    "isolated_dir": "frontend/tests/e2e/isolated",
-    "live_dir": "frontend/tests/e2e/live",
-    "default_folder": "isolated",
-    "registry_path": "frontend/tests/e2e/registry.json",
-    "id_prefix": "QA-",
-    "id_digits": 3,
-    "playwright_cwd": "frontend",
-    "playwright_command": [
-      "npx",
-      "playwright",
-      "test"
-    ],
-    "pr_base": "dev",
-    "branch_prefix": "qa/save-test-"
   }
 }

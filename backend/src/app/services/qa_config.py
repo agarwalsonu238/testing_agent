@@ -1,9 +1,10 @@
-"""Load `qa/qa.config.json`, the design files, and the risky-endpoint /
-mock rules built from them."""
+"""Load the QA config (the tool's generic defaults, overlaid with the tested project's own
+`.qa/qa.config.json`), the design files, and the risky-endpoint / mock rules built from them."""
 
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -16,16 +17,69 @@ from app.schemas.runs import RunMode
 _MOCK_LIST = TypeAdapter(list[MockSpec])
 
 
-def load_qa_config(settings: Settings) -> QaConfig:
-    """Read the QA config (defaults when the file is missing) and merge the app repo's mocks file.
+# Where a tested project keeps its own QA settings and design PNGs, relative to its repo root.
+PROJECT_QA_DIR = ".qa"
+PROJECT_CONFIG = f"{PROJECT_QA_DIR}/qa.config.json"
+PROJECT_DESIGNS = f"{PROJECT_QA_DIR}/designs"
 
-    Raises PreconditionError when a file exists but is invalid.
+# Safety and noise lists are added together, so a project can't drop one of the tool's rules.
+_CONCAT_KEYS = ("noise_filter", "risky_endpoints", "mocks")
+# Settings objects are overlaid key by key: a project sets only the fields it cares about.
+_OVERLAY_KEYS = ("limits", "auth", "tests", "changes")
+
+
+def project_config_path(settings: Settings) -> Path | None:
+    """The tested project's `.qa/qa.config.json`, or None when there is no repo or no file."""
+    if settings.app_repo_path is None:
+        return None
+    path = settings.app_repo_path / PROJECT_CONFIG
+    return path if path.is_file() else None
+
+
+def merge_qa_config(base: dict[str, Any], project: dict[str, Any]) -> dict[str, Any]:
+    """Overlay a project's raw config on the tool defaults (both as parsed JSON).
+
+    Lists in `_CONCAT_KEYS` are concatenated, objects in `_OVERLAY_KEYS` are overlaid field by
+    field, and every other key the project sets replaces the default.
     """
-    path = settings.qa_config_path
+    merged = dict(base)
+    for key, value in project.items():
+        current = merged.get(key)
+        if key in _CONCAT_KEYS and isinstance(current, list) and isinstance(value, list):
+            merged[key] = current + value
+        elif key in _OVERLAY_KEYS and isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = {**current, **value}
+        else:
+            merged[key] = value
+    return merged
+
+
+def _read_json(path: Path) -> dict[str, Any]:
     try:
-        config = QaConfig.model_validate_json(path.read_text()) if path.exists() else QaConfig()
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise PreconditionError(f"{path} is not valid JSON: {exc.msg} (line {exc.lineno})") from exc
+    if not isinstance(data, dict):
+        raise PreconditionError(f"{path} must contain a JSON object")
+    return data
+
+
+def load_qa_config(settings: Settings) -> QaConfig:
+    """The tool's defaults (`qa/qa.config.json`, or built-in defaults when it's missing),
+    overlaid with the tested project's `.qa/qa.config.json`, plus the project's mocks file.
+
+    Raises PreconditionError when a file exists but is invalid, naming that file.
+    """
+    tool_path = settings.qa_config_path
+    raw = _read_json(tool_path) if tool_path.exists() else {}
+    project_path = project_config_path(settings)
+    if project_path is not None:
+        raw = merge_qa_config(raw, _read_json(project_path))
+    try:
+        config = QaConfig.model_validate(raw)
     except ValidationError as exc:
-        raise PreconditionError(f"{path} is invalid: {exc.errors()[0]['msg']}") from exc
+        where = project_path if project_path is not None else tool_path
+        raise PreconditionError(f"{where} is invalid: {exc.errors()[0]['msg']}") from exc
     if config.mocks_file and settings.app_repo_path:
         mocks_path = settings.app_repo_path / config.mocks_file
         if mocks_path.exists():
@@ -104,18 +158,29 @@ def route_slug(route: str) -> str:
     return slug or "home"
 
 
+def designs_dir(settings: Settings) -> Path:
+    """The tested project's `.qa/designs/` when it exists, else the tool's DESIGNS_DIR."""
+    if settings.app_repo_path is not None:
+        project = settings.app_repo_path / PROJECT_DESIGNS
+        if project.is_dir():
+            return project
+    return settings.designs_dir
+
+
 def list_designs(settings: Settings) -> list[str]:
-    if not settings.designs_dir.is_dir():
+    folder = designs_dir(settings)
+    if not folder.is_dir():
         return []
-    return sorted(p.name for p in settings.designs_dir.glob("*.png"))
+    return sorted(p.name for p in folder.glob("*.png"))
 
 
 def design_files(settings: Settings, route: str) -> dict[str, Path]:
     """Design PNGs for a route by viewport, e.g. {"desktop": designs/pricing.desktop.png}."""
     slug = route_slug(route)
+    folder = designs_dir(settings)
     found: dict[str, Path] = {}
     for viewport in ("desktop", "mobile"):
-        path = settings.designs_dir / f"{slug}.{viewport}.png"
+        path = folder / f"{slug}.{viewport}.png"
         if path.is_file():
             found[viewport] = path.resolve()
     return found

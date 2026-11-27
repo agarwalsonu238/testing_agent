@@ -1,7 +1,7 @@
-from app.integrations.browser import PageObservation, RequestRecord
+from app.integrations.browser import PageObservation, RequestRecord, RouteDecision
 from app.schemas.qa_config import Limits
 from app.services.qa_config import compile_noise
-from app.services.quick_scan import observations_to_findings
+from app.services.quick_scan import discoverable_paths, observations_to_findings, page_name
 
 LIMITS = Limits(slow_api_ms=2000, slow_page_ms=5000)
 NOISE = compile_noise([r"\[HMR\]", "webpack-hmr"])
@@ -122,3 +122,37 @@ def test_findings_carry_location_and_screenshot() -> None:
     )
     assert findings[0].location == "/pricing · mobile"
     assert findings[0].evidence[-1].path == "screenshots/pricing-mobile.png"
+
+
+def _allow(url: str, method: str) -> RouteDecision | None:
+    return None
+
+
+def test_discoverable_paths_keeps_same_site_pages_once_in_order() -> None:
+    links = [
+        "https://app.example.test/pricing",
+        "https://app.example.test/pricing?plan=pro",
+        "https://app.example.test/pricing#faq",
+        "https://app.example.test/",
+        "https://other.example.test/blog",
+        "mailto:hi@example.test",
+        "https://app.example.test/logout",
+        "https://app.example.test/terms.pdf",
+        "https://app.example.test/how-it-works",
+    ]
+    paths = discoverable_paths(links, "https://app.example.test", _allow)
+    assert paths == ["/pricing", "/", "/how-it-works"]
+
+
+def test_discoverable_paths_skips_what_the_guard_would_block() -> None:
+    def block_admin(url: str, method: str) -> RouteDecision | None:
+        return RouteDecision(kind="block", label="risky") if "/admin" in url else None
+
+    links = ["https://app.example.test/admin/users", "https://app.example.test/faq"]
+    assert discoverable_paths(links, "https://app.example.test/", block_admin) == ["/faq"]
+
+
+def test_page_name_reads_the_last_path_segment() -> None:
+    assert page_name("/") == "Home"
+    assert page_name("/how-it-works") == "How it works"
+    assert page_name("/docs/getting_started/") == "Getting started"

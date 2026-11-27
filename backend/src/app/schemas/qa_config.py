@@ -1,6 +1,6 @@
-"""Shape of `qa/qa.config.json`: the one config file next to `.env` (page list,
-limits, noise filter,
-risky endpoints, mocks, login, test folders)."""
+"""Shape of the QA config: the tool's generic defaults in `qa/qa.config.json`, overlaid with the
+tested project's own `.qa/qa.config.json` (page list, limits, noise filter, risky endpoints, mocks,
+login, test folders). See `services/qa_config.load_qa_config` for the merge rules."""
 
 from typing import Any, Literal
 
@@ -23,6 +23,8 @@ class Limits(BaseModel):
     slow_page_ms: int = 5000
     page_timeout_ms: int = 30000
     max_links_per_page: int = 25
+    # Quick Scan with no `pages` listed: how many same-site pages to discover by following links.
+    max_pages: int = Field(default=15, ge=1, le=100)
 
 
 class EndpointRule(BaseModel):
@@ -110,7 +112,8 @@ class ChangeRules(BaseModel):
 
 
 class QaConfig(BaseModel):
-    pages: list[PageSpec] = [PageSpec(path="/", name="Home")]
+    # Empty = Quick Scan discovers pages from links, starting at "/" (up to `limits.max_pages`).
+    pages: list[PageSpec] = []
     viewports: dict[str, Viewport] = {
         "desktop": Viewport(width=1440, height=900),
         "mobile": Viewport(width=390, height=844, is_mobile=True),
