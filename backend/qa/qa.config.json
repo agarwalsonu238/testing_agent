@@ -68,7 +68,9 @@
     "\\.hot-update\\.",
     "Download the React DevTools",
     "/favicon\\.ico",
-    "\\[vite\\] (connecting|connected)"
+    "\\[vite\\] (connecting|connected)",
+    "'upgrade-insecure-requests' is ignored when delivered in a report-only policy",
+    "csp-report\\.browser-intake-datadoghq\\.com"
   ],
   "api_url_pattern": "*/api/*",
   "risky_endpoints": [
