@@ -122,6 +122,12 @@ def test_child_env_strips_billing_credentials(monkeypatch: pytest.MonkeyPatch) -
     assert "ANTHROPIC_AUTH_TOKEN" not in env
 
 
+def test_child_env_makes_agents_wait_for_mcp_servers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MCP_CONNECTION_NONBLOCKING", "true")
+    env = child_process_env(Settings(claude_code_oauth_token=None))
+    assert env["MCP_CONNECTION_NONBLOCKING"] == "false"
+
+
 def test_settings_report_billed_credentials_without_values() -> None:
     settings = Settings(anthropic_api_key="sk-live-123", anthropic_auth_token=None)
     assert settings.billed_credentials_set() == ["ANTHROPIC_API_KEY"]

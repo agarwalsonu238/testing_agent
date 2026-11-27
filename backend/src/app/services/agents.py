@@ -186,7 +186,8 @@ def write_mcp_config(
     init_page: Path | None,
     storage_state: Path | None,
     viewport: str,
-) -> None:
+) -> bool:
+    """Write the run's MCP config; True when it starts at least one server."""
     config: dict[str, Any] = {}
     if "playwright" in servers:
         args = [
@@ -215,6 +216,7 @@ def write_mcp_config(
     if "figma" in servers and settings.figma_mcp_url:
         config["figma"] = {"type": "http", "url": settings.figma_mcp_url}
     out.write_text(json.dumps({"mcpServers": config}, indent=2))
+    return bool(config)
 
 
 # --- Reports ---
@@ -734,7 +736,7 @@ async def invoke_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) -> Age
         write_init_page(s.init_page_template_path, init_page, guard, recorder)
         state = await _storage_state(deps, call.mode, guard, auth_state)
     mcp_path = work / "mcp.json"
-    write_mcp_config(
+    has_mcp = write_mcp_config(
         mcp_path,
         settings=s,
         servers=call.agent.mcp,
@@ -754,7 +756,10 @@ async def invoke_agent(ctx: RunContext, deps: AgentDeps, call: AgentCall) -> Age
         disallowed_tools=disallowed,
         add_dirs=list(call.add_dirs),
         mcp_config=mcp_path,
-        json_schema=call.schema,
+        # `--json-schema` makes Claude Code take its first turn before MCP servers connect (seen on
+        # 2.1.173), so a browser agent starts with no browser tools. The prompt already asks for
+        # JSON matching the schema, and the stream parser falls back to extracting it from text.
+        json_schema=None if has_mcp else call.schema,
         raw_log=work / call.raw_log_name,
     )
     ctx.event(f"Starting {name}", source=name)

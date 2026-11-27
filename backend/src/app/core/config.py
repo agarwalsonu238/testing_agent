@@ -8,6 +8,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Credentials that make Claude Code bill the API instead of the developer's subscription.
 BILLED_CREDENTIAL_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+# Claude Code (seen on 2.1.173) connects `--mcp-config` servers in the background by default, and a
+# parent Claude Code session exports it as "true" too. Then `claude -p` takes its first turn before
+# the Playwright server is up, the agent has no browser tools, and the run comes back BLOCKED.
+# An explicit "false" makes it wait for the servers before starting.
+MCP_NONBLOCKING_VAR = "MCP_CONNECTION_NONBLOCKING"
 
 
 class Settings(BaseSettings):
@@ -142,9 +147,12 @@ def child_process_env(settings: Settings) -> dict[str, str]:
     """Environment for subprocesses (Claude Code, git, Playwright).
 
     Billing credentials are always stripped, so even a key that appears after the run started
-    can't make Claude Code bill the API. The optional subscription token is passed through.
+    can't make Claude Code bill the API. MCP_CONNECTION_NONBLOCKING is forced to "false" so agents
+    wait for their MCP servers (the browser) before starting. The optional subscription token is
+    passed through.
     """
     env = {k: v for k, v in os.environ.items() if k not in BILLED_CREDENTIAL_VARS}
+    env[MCP_NONBLOCKING_VAR] = "false"
     if settings.claude_code_oauth_token:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = settings.claude_code_oauth_token.get_secret_value()
     return env

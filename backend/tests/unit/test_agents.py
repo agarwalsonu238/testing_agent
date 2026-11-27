@@ -260,7 +260,7 @@ def test_init_page_and_mcp_config_are_generated(tmp_path: Path) -> None:
     assert '"risky": [{"url": "*/pay*"' in text
 
     mcp = tmp_path / "mcp.json"
-    write_mcp_config(
+    started = write_mcp_config(
         mcp,
         settings=Settings(browser_channel="chrome", chrome_devtools_mcp=False, figma_mcp_url=None),
         servers=["playwright", "chrome-devtools", "figma"],
@@ -275,6 +275,18 @@ def test_init_page_and_mcp_config_are_generated(tmp_path: Path) -> None:
     assert "@playwright/mcp@0.0.85" in args  # pinned
     assert args[args.index("--browser") + 1] == "chrome"
     assert args[args.index("--init-page") + 1] == str(init)
+    assert started  # so the caller skips --json-schema, which would start the agent first
+
+    none = tmp_path / "none.json"
+    assert not write_mcp_config(
+        none,
+        settings=Settings(),
+        servers=[],
+        output_dir=tmp_path,
+        init_page=None,
+        storage_state=None,
+        viewport="390x844",
+    )
 
 
 def test_classify_changes_picks_agents_by_rule() -> None:
